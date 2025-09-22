@@ -1,0 +1,47 @@
+/* Collaborator cursor styles */
+.collaborator-cursor-before {
+  position: absolute;
+  width: 2px;
+  height: 18px;
+  z-index: 10;
+  animation: cursor-blink 1s infinite;
+}
+
+.collaborator-cursor-inline {
+  background-color: rgba(var(--cursor-color, 0, 122, 204), 0.3);
+}
+
+.collaborator-cursor-after {
+  content: attr(data-name);
+  position: absolute;
+  top: -20px;
+  left: 0;
+  background-color: var(--cursor-color, #007acc);
+  color: white;
+  padding: 2px 4px;
+  border-radius: 2px;
+  font-size: 10px;
+  white-space: nowrap;
+  z-index: 11;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+
+.collaborator-cursor:hover .collaborator-cursor-after {
+  opacity: 1;
+}
+
+/* Comment highlight styles */
+.comment-highlight {
+  background-color: rgba(255, 204, 0, 0.2);
+  border-bottom: 1px dashed #FFCC00;
+}
+
+.comment-decoration {
+  cursor: pointer;
+}
+
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}

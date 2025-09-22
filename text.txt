@@ -87,22 +87,6 @@ useLogs hook → subscribe to SSE logs.
 
 
 
-AST Parsing:
-Implement Babel AST parsing for API endpoint detection
-Generate API documentation from code
-API Testing:
-Create a testing panel for API endpoints
-Add request/response visualization
-Real-time Features:
-Enhance WebSocket integration
-Implement real-time collaboration
-Add live logging
-Error Handling:
-Add error boundaries
-Improve error messages and loading states
-Testing:
-Write unit tests for components
-Add integration tests for critical flows
 
 
 

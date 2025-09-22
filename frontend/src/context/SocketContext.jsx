@@ -6,7 +6,7 @@ const SocketContext = createContext(null);
 
 export const SocketProvider = ({ children }) => {
   const [socket, setSocket] = useState(null);
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, user } = useAuth();
 
   useEffect(() => {
     if (isAuthenticated && !socket) {
@@ -56,7 +56,7 @@ export const SocketProvider = ({ children }) => {
   // Join a project room
   const joinProject = (projectId) => {
     if (socket && projectId) {
-      socket.emit('joinProject', projectId);
+      socket.emit('joinProject', projectId, user?.username || 'User');
     }
   };
 
@@ -97,6 +97,60 @@ export const SocketProvider = ({ children }) => {
     }
   };
 
+  // Send cursor position update to other users in the project
+  const sendCursorPosition = (projectId, position) => {
+    if (socket && projectId) {
+      socket.emit('cursorPosition', { 
+        projectId, 
+        position,
+        user: {
+          id: user?.id,
+          name: user?.name || user?.username || 'Anonymous',
+          email: user?.email,
+          color: user?.color
+        }
+      });
+    }
+  };
+
+  // Subscribe to cursor position updates
+  const onCursorPositionUpdate = (callback) => {
+    if (!socket) return () => {};
+    
+    socket.on('cursorPosition', callback);
+    return () => socket.off('cursorPosition', callback);
+  };
+
+  // Send chat message
+  const sendChatMessage = (message) => {
+    if (socket && message.projectId) {
+      socket.emit('sendChatMessage', message);
+    }
+  };
+
+  // Subscribe to chat messages
+  const onChatMessage = (callback) => {
+    if (!socket) return () => {};
+    
+    socket.on('chatMessage', callback);
+    return () => socket.off('chatMessage', callback);
+  };
+  
+  // Send code comment
+  const sendCodeComment = (projectId, comment) => {
+    if (socket && projectId) {
+      socket.emit('codeComment', { projectId, comment });
+    }
+  };
+
+  // Subscribe to code comments
+  const onCodeComment = (callback) => {
+    if (!socket) return () => {};
+    
+    socket.on('codeComment', callback);
+    return () => socket.off('codeComment', callback);
+  };
+
   return (
     <SocketContext.Provider
       value={{
@@ -104,9 +158,15 @@ export const SocketProvider = ({ children }) => {
         joinProject,
         leaveProject,
         onCodeUpdate,
-        onExecutionLog,
         sendCodeUpdate,
+        onExecutionLog,
         sendExecutionLog,
+        sendCursorPosition,
+        onCursorPositionUpdate,
+        sendChatMessage,
+        onChatMessage,
+        sendCodeComment,
+        onCodeComment,
       }}
     >
       {children}

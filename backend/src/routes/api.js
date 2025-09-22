@@ -7,7 +7,8 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import Project from '../models/Project.js';
 import { authenticateToken } from '../middleware/auth.js';
-import { parseCodeForEndpoints } from '../services/parserService.js';
+import { parseCodeForEndpoints, generateOpenAPISpec } from '../services/parserService.js';
+// (deduped)
 
 const router = express.Router();
 const execPromise = promisify(exec);
@@ -17,6 +18,7 @@ const __dirname = path.dirname(__filename);
 // Parse code and extract endpoints
 router.post('/parse', authenticateToken, async (req, res, next) => {
   try {
+    const socketIO = (req.app && typeof req.app.get === 'function') ? req.app.get('io') : null;
     const { code } = req.body;
     
     if (!code) {
@@ -30,10 +32,38 @@ router.post('/parse', authenticateToken, async (req, res, next) => {
   }
 });
 
+// Generate OpenAPI spec for a project's current code
+router.get('/openapi/:projectId', authenticateToken, async (req, res, next) => {
+  try {
+    const { projectId } = req.params;
+    const project = await Project.findById(projectId);
+    if (!project) return res.status(404).json({ message: 'Project not found' });
+    const endpoints = parseCodeForEndpoints(project.code || '');
+    const spec = generateOpenAPISpec(endpoints);
+    res.json(spec);
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Generate OpenAPI spec from provided code (no need to save first)
+router.post('/openapi', authenticateToken, async (req, res, next) => {
+  try {
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ message: 'Code is required' });
+    const endpoints = parseCodeForEndpoints(code);
+    const spec = generateOpenAPISpec(endpoints);
+    res.json(spec);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Execute code and get output
 router.post('/execute', authenticateToken, async (req, res, next) => {
   console.log('Execute request body:', req.body);
   const { code, projectId } = req.body;
+  const socketIO = (req.app && typeof req.app.get === 'function') ? req.app.get('io') : null;
   
   if (!code) {
     return res.status(400).json({ message: 'Code is required' });
@@ -74,24 +104,32 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
     // Install dependencies
     await execPromise('npm install', { cwd: tempDirPath });
 
-    // Execute the code with a timeout of 10 seconds (kill process on timeout)
+    // Determine port: reuse project.runPort if set, else 0 to pick free port and persist it
+    let desiredPort = 0;
+    if (projectId) {
+      const proj = await Project.findById(projectId);
+      if (proj?.runPort) desiredPort = proj.runPort;
+      // Inform client of intended base URL for convenience
+      if (socketIO) socketIO.to(projectId).emit('executionLog', `Base URL: http://127.0.0.1:${desiredPort || '(allocating...)'}\n`);
+    }
+
+    // Execute the code with a timeout (kill process on timeout)
     let stdout = '';
     let stderr = '';
     let timedOut = false;
-    const io = req.app.get('io');
     await new Promise((resolve, reject) => {
       const child = exec('node index.js', {
         cwd: tempDirPath,
-        env: { ...process.env, PORT: 0 },
+        env: { ...process.env, PORT: desiredPort },
       });
 
       if (child.stdout) child.stdout.on('data', (d) => {
         stdout += d;
-        if (io && projectId) io.to(projectId).emit('executionLog', String(d));
+        if (socketIO && projectId) socketIO.to(projectId).emit('executionLog', String(d));
       });
       if (child.stderr) child.stderr.on('data', (d) => {
         stderr += d;
-        if (io && projectId) io.to(projectId).emit('executionLog', String(d));
+        if (socketIO && projectId) socketIO.to(projectId).emit('executionLog', String(d));
       });
 
       const timer = setTimeout(() => {
@@ -99,10 +137,20 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
         try { child.kill('SIGKILL'); } catch {}
         // Resolve after killing the long-running process, treating as successful run with captured logs
         resolve(null);
-      }, 10000);
+      }, 60000);
 
-      child.on('exit', () => {
+      child.on('exit', async () => {
         clearTimeout(timer);
+        // If a dynamic port was selected, parse it from stdout and persist to project.runPort
+        try {
+          if (projectId && desiredPort === 0) {
+            const match = stdout.match(/http:\/\/127\.0\.0\.1:(\d+)/) || stdout.match(/port\s+(\d+)/i);
+            const port = match ? Number(match[1]) : null;
+            if (port) {
+              await Project.findByIdAndUpdate(projectId, { runPort: port });
+            }
+          }
+        } catch {}
         resolve(null);
       });
       child.on('error', (err) => {
@@ -110,6 +158,38 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
         reject(err);
       });
     });
+
+    // If port in use, retry once on a random free port and persist it
+    if (/EADDRINUSE/i.test(stderr)) {
+      let retryStdout = '';
+      let retryStderr = '';
+      await new Promise((resolve) => {
+        const child = exec('node index.js', {
+          cwd: tempDirPath,
+          env: { ...process.env, PORT: 0 },
+        });
+        if (child.stdout) child.stdout.on('data', (d) => {
+          retryStdout += d;
+          if (socketIO && projectId) socketIO.to(projectId).emit('executionLog', String(d));
+        });
+        if (child.stderr) child.stderr.on('data', (d) => {
+          retryStderr += d;
+          if (socketIO && projectId) socketIO.to(projectId).emit('executionLog', String(d));
+        });
+        child.on('exit', async () => {
+          try {
+            if (projectId) {
+              const match = retryStdout.match(/http:\/\/127\.0\.0\.1:(\d+)/) || retryStdout.match(/port\s+(\d+)/i);
+              const port = match ? Number(match[1]) : null;
+              if (port) await Project.findByIdAndUpdate(projectId, { runPort: port });
+            }
+          } catch {}
+          stdout += retryStdout;
+          stderr += retryStderr;
+          resolve(null);
+        });
+      });
+    }
 
     // Clean up (safe remove with retry for Windows EPERM)
     try {

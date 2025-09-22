@@ -159,6 +159,7 @@ export const AuthProvider = ({ children }) => {
       const userId = user?.id || user?._id;
       const { data } = await api.put(`/users/${userId}`, updates);
       setUser(data);
+      try { localStorage.setItem("user", JSON.stringify(data)); } catch {}
       toast.success("Profile updated successfully");
       return true;
     } catch (error) {

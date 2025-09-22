@@ -4,6 +4,21 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
+// Search users by username/email (for invites)
+router.get('/search', authenticateToken, async (req, res, next) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json([]);
+    const regex = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    const users = await User.find({ $or: [{ username: regex }, { email: regex }] })
+      .select('_id username email avatar')
+      .limit(10);
+    res.json(users);
+  } catch (error) {
+    next(error);
+  }
+});
+
 // Get user profile
 router.get('/:id', authenticateToken, async (req, res, next) => {
   try {

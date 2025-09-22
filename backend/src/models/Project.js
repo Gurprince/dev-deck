@@ -28,6 +28,38 @@ const projectSchema = new mongoose.Schema({
       default: 'editor'
     }
   }],
+  invitations: [{
+    user: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: 'User', 
+      required: true 
+    },
+    email: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true
+    },
+    role: { 
+      type: String, 
+      enum: ['admin', 'editor', 'viewer'], 
+      default: 'editor' 
+    },
+    status: { 
+      type: String, 
+      enum: ['pending', 'accepted', 'declined'], 
+      default: 'pending' 
+    },
+    invitedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      required: true
+    },
+    invitedAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
   code: {
     type: String,
     default: '// Write your code here\n// This is a sample Express.js route\napp.get(\'/api/hello\', (req, res) => {\n  res.json({ message: \'Hello from DevDeck!\' });\n});'
@@ -54,6 +86,10 @@ const projectSchema = new mongoose.Schema({
   isPublic: {
     type: Boolean,
     default: false
+  },
+  runPort: {
+    type: Number,
+    default: null
   },
   createdAt: {
     type: Date,

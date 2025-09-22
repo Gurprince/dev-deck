@@ -9,6 +9,7 @@ import { ProjectProvider } from './context/ProjectContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { SocketProvider } from './context/SocketContext';
 import App from './App';
+import ErrorBoundary from './components/common/ErrorBoundary';
 import './index.css';
 
 // Create a client for React Query
@@ -30,7 +31,9 @@ createRoot(document.getElementById('root')).render(
           <SocketProvider>
             <ProjectProvider>
               <ThemeProvider>
-                <App />
+                <ErrorBoundary>
+                  <App />
+                </ErrorBoundary>
                 <Toaster
                   position="top-right"
                   toastOptions={{

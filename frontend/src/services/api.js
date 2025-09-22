@@ -57,10 +57,24 @@ export const projectsApi = {
   create: (projectData) => api.post('/projects', projectData),
   update: (id, updates) => api.put(`/projects/${id}`, updates),
   delete: (id) => api.delete(`/projects/${id}`),
-  addCollaborator: (projectId, userId, role = 'editor') => 
-    api.post(`/projects/${projectId}/collaborators/`, { userId, role }),
+  // Add a collaborator by email
+  addCollaborator: async (projectId, { email, role = 'editor' }) => {
+    try {
+      const response = await api.post(`/projects/${projectId}/collaborators`, { 
+        email: email.toLowerCase().trim(), 
+        role 
+      });
+      console.log('API Response:', response);
+      return response;
+    } catch (error) {
+      console.error('Error in addCollaborator:', error);
+      throw error;
+    }
+  },
+  // Search for users by email or name
+  searchUsers: (query) => api.get(`/users/search?q=${encodeURIComponent(query)}`),
   removeCollaborator: (projectId, userId) => 
-    api.delete(`/projects/${projectId}/collaborators/${userId}/`),
+    api.delete(`/projects/${projectId}/collaborators/${userId}`),
 };
 
 // Code Execution API
@@ -83,10 +97,18 @@ export const executionApi = {
     api.post(`/projects/${projectId}/endpoints`, { endpoints }),
 };
 
+// Invitations API
+export const invitationsApi = {
+  getMyInvitations: () => api.get('/projects/invitations/me'),
+  respondToInvitation: (projectId, invitationId, action) => 
+    api.post(`/projects/${projectId}/invitations/${invitationId}/${action}`)
+};
+
 // Users API
 export const usersApi = {
   updateProfile: (userId, updates) => api.put(`/users/${userId}`, updates),
   getProfile: (userId) => api.get(`/users/${userId}`),
+  search: (q) => api.get(`/users/search`, { params: { q } }),
 };
 
 export default api;

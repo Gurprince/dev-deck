@@ -1,4 +1,4 @@
-import { PlayIcon, CodeBracketIcon as CodeIcon, CommandLineIcon as TerminalIcon, ArrowDownTrayIcon as SaveIcon, ArrowPathIcon as RefreshIcon } from '@heroicons/react/24/outline';
+import { PlayIcon, CodeBracketIcon as CodeIcon, CommandLineIcon as TerminalIcon, ArrowDownTrayIcon as SaveIcon, ArrowPathIcon as RefreshIcon, ChatBubbleLeftRightIcon } from '@heroicons/react/24/outline';
 import * as monaco from 'monaco-editor';
 import { useTheme } from '../../context/ThemeContext';
 import { useSocket } from '../../context/SocketContext';
@@ -7,6 +7,9 @@ import CodeEditor from './CodeEditor';
 import EditorToolbar from './EditorToolbar';
 import OutputPanel, { LogLevels } from './OutputPanel';
 import EditorTabs from './EditorTabs';
+import TestRunner from './TestRunner';
+import CollaboratorsBar from './CollaboratorsBar';
+import ChatPanel from './ChatPanel';
 import { useRef } from 'react';
 import { useEffect, useCallback, useState } from 'react';
 
@@ -48,6 +51,7 @@ const CodePlayground = ({
   const editorRef = useRef(null);
   const [endpoints, setEndpoints] = useState([]);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   // Reset editor content when initialCode prop changes (e.g., navigating to New Project)
   useEffect(() => {
@@ -348,6 +352,58 @@ const CodePlayground = ({
                 <p className="mt-2 text-sm">Add Express.js route handlers to see them documented here.</p>
               </div>
             )}
+            <div className="mt-6 flex items-center space-x-2">
+              <button
+                onClick={async () => {
+                  try {
+                    const token = localStorage.getItem('token');
+                    const res = await fetch(`/api/openapi/${projectId}`, {
+                      headers: { Authorization: `Bearer ${token}` },
+                      credentials: 'include',
+                    });
+                    const data = await res.json();
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `openapi-${projectId}.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                  } catch {}
+                }}
+                className="inline-flex items-center px-3 py-1.5 rounded bg-indigo-600 text-white"
+              >
+                Download OpenAPI (Saved Code)
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const token = localStorage.getItem('token');
+                    const res = await fetch(`/api/openapi`, {
+                      method: 'POST',
+                      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                      credentials: 'include',
+                      body: JSON.stringify({ code }),
+                    });
+                    const data = await res.json();
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `openapi-current.json`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    URL.revokeObjectURL(url);
+                  } catch {}
+                }}
+                className="inline-flex items-center px-3 py-1.5 rounded bg-gray-700 text-white"
+              >
+                Download OpenAPI (Current Editor)
+              </button>
+            </div>
           </div>
         );
       case 'test':
@@ -440,7 +496,24 @@ const CodePlayground = ({
         isRunning={isRunning}
         isSaving={isSaving}
         canSave={hasUnsavedChanges || !projectId}
-      />
+      >
+        <div className="flex items-center space-x-2">
+          <button
+            type="button"
+            onClick={() => setIsChatOpen(!isChatOpen)}
+            className={`inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+              theme === 'dark' 
+                ? `text-white ${isChatOpen ? 'bg-indigo-600' : 'bg-gray-700'} hover:bg-gray-600 focus:ring-gray-500` 
+                : `text-gray-700 ${isChatOpen ? 'bg-indigo-100' : 'bg-white'} border-gray-300 hover:bg-gray-50 focus:ring-indigo-500`
+            }`}
+            aria-label="Toggle chat"
+          >
+            <ChatBubbleLeftRightIcon className="h-4 w-4 mr-1.5" />
+            Chat
+          </button>
+          <CollaboratorsBar projectId={projectId} />
+        </div>
+      </EditorToolbar>
       
       {/* Tabs */}
       <EditorTabs
@@ -456,6 +529,13 @@ const CodePlayground = ({
       <div className="flex-1 overflow-hidden">
         {renderActiveTab()}
       </div>
+      
+      {/* Chat Panel */}
+      <ChatPanel 
+        projectId={projectId} 
+        isOpen={isChatOpen} 
+        onClose={() => setIsChatOpen(false)} 
+      />
     </div>
   );
 };

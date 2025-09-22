@@ -13,6 +13,7 @@ import {
   Squares2X2Icon as ViewGridIcon,
 } from '@heroicons/react/24/outline';
 import ProfileForm from './ProfileForm';
+import InvitationsDropdown from '../notifications/InvitationsDropdown';
 
 const AppLayout = () => {
   const { user, logout } = useAuth();
@@ -142,10 +143,14 @@ const AppLayout = () => {
             </nav>
           </div>
           <div className="flex-shrink-0 flex border-t border-gray-200 dark:border-gray-700 p-4">
-            <div className="flex items-center">
-              <div>
-                <UserCircleIcon className="h-10 w-10 text-gray-400" />
-              </div>
+              <div className="flex items-center">
+                <div>
+                  {user?.avatar ? (
+                    <img src={user.avatar} alt="avatar" className="h-10 w-10 rounded-full object-cover" onError={(e)=>{ e.currentTarget.style.display='none'; }} />
+                  ) : (
+                    <UserCircleIcon className="h-10 w-10 text-gray-400" />
+                  )}
+                </div>
               <div className="ml-3">
                 <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
                   {user?.username || 'User'}
@@ -186,6 +191,11 @@ const AppLayout = () => {
                   <MoonIcon className="h-6 w-6" aria-hidden="true" />
                 )}
               </button>
+
+              {/* Notifications dropdown */}
+              <div className="ml-3">
+                <InvitationsDropdown />
+              </div>
 
               {/* Profile dropdown */}
               <div className="ml-3 relative">
@@ -244,12 +254,24 @@ const AppLayout = () => {
         </main>
 
         {/* Edit Profile Modal */}
-        <dialog id="edit-profile-modal" className="modal">
-          <div className="modal-box bg-white dark:bg-gray-800">
-            <h3 className="font-bold text-lg mb-4 text-gray-900 dark:text-white">Edit Profile</h3>
-            <ProfileForm onClose={() => document.getElementById('edit-profile-modal').close()} />
-            <div className="modal-action">
-              <button type="button" className="btn" onClick={() => document.getElementById('edit-profile-modal').close()}>Close</button>
+        <dialog id="edit-profile-modal" className="fixed inset-0 z-50">
+          <div className="min-h-screen w-full flex items-center justify-center bg-black/50 p-4">
+            <div className="w-full max-w-md rounded-lg shadow-lg bg-white dark:bg-gray-800 transform transition-all">
+              <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Edit Profile</h3>
+              </div>
+              <div className="px-6 py-4">
+                <ProfileForm onClose={() => document.getElementById('edit-profile-modal').close()} />
+              </div>
+              <div className="px-6 py-3 border-t border-gray-200 dark:border-gray-700 flex justify-end">
+                <button
+                  type="button"
+                  className="px-4 py-2 rounded-md text-sm font-medium bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-100"
+                  onClick={() => document.getElementById('edit-profile-modal').close()}
+                >
+                  Close
+                </button>
+              </div>
             </div>
           </div>
         </dialog>

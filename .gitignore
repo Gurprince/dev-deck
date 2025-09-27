@@ -11,4 +11,4 @@ backend/.env
 dist/
 build/
 
-text.text
+text.txt

@@ -489,18 +489,40 @@ const CollaboratorsBar = ({ projectId }) => {
     <div className="relative flex items-center space-x-4">
       {/* Collaborators list - Notion/Google Docs style */}
       <div className="flex items-center -space-x-3">
-        {collabs.map((collaborator) => (
-          <div key={collaborator.userId || collaborator._id} className="relative group transition-transform hover:-translate-y-1 duration-200">
-            <UserAvatar 
-              user={{
-                ...collaborator,
-                avatarText: collaborator.name ? collaborator.name.charAt(0).toUpperCase() : collaborator.email.charAt(0).toUpperCase(),
-                color: collaborator.color || stringToColor(collaborator.email || collaborator.name || 'Anonymous')
-              }} 
-              showTooltip={true}
-            />
-          </div>
-        ))}
+        {Array.isArray(collabs) && collabs.map((collaborator) => {
+          // Ensure we have valid data
+          if (!collaborator) return null;
+          
+          const userId = collaborator.userId || collaborator._id || collaborator.id;
+          const name = collaborator.name || collaborator.username || collaborator.email?.split('@')[0] || 'Anonymous';
+          const email = collaborator.email || `${collaborator.username || 'user'}@example.com`;
+          const avatarText = name.charAt(0).toUpperCase();
+          const color = collaborator.color || stringToColor(email || name);
+          
+          return (
+            <div 
+              key={userId} 
+              className="relative group transition-transform hover:-translate-y-1 duration-200"
+              title={`${name}${email && email !== name ? ` (${email})` : ''}`}
+            >
+              <UserAvatar 
+                user={{
+                  id: userId,
+                  name,
+                  email,
+                  avatar: collaborator.avatar,
+                  avatarText,
+                  color,
+                  status: collaborator.status || 'online'
+                }} 
+                showTooltip={true}
+              />
+              {collaborator.status === 'online' && (
+                <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full bg-green-500 ring-2 ring-white dark:ring-gray-800" />
+              )}
+            </div>
+          );
+        })}
       </div>
 
       {/* Add collaborator button */}

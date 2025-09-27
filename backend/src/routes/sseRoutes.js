@@ -1,11 +1,222 @@
 // backend/src/routes/sseRoutes.js
 import express from "express";
+import jwt from 'jsonwebtoken';
 import { logger } from "../sandbox/logger.js";
 import Project from "../models/Project.js";
+import Message from "../models/Message.js";
+import { authenticateToken } from "../middleware/auth.js";
 
 const router = express.Router();
 
-router.get("/events/:projectId", async (req, res) => {
+// Store active connections for SSE
+const activeConnections = new Map();
+
+// Middleware to authenticate WebSocket and SSE connections
+const authenticateConnection = (req, res, next) => {
+  try {
+    // Try to get token from query params, headers, or handshake auth
+    const token = req.query?.token || 
+                 (req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.split(' ')[1] : null) ||
+                 (req.handshake?.auth?.token || null);
+    
+    if (!token) {
+      console.log('No token provided for authentication');
+      return res.status(401).json({ message: 'Authentication required' });
+    }
+    
+    // Verify the token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    if (!decoded.userId) {
+      console.log('Invalid token: missing userId');
+      return res.status(403).json({ message: 'Invalid token format' });
+    }
+    
+    // Attach user to request
+    req.user = {
+      userId: decoded.userId,
+      email: decoded.email,
+      name: decoded.name
+    };
+    
+    next();
+  } catch (error) {
+    console.error('Authentication error:', error);
+    const status = error.name === 'TokenExpiredError' ? 401 : 403;
+    return res.status(status).json({ 
+      message: error.name === 'TokenExpiredError' ? 'Token expired' : 'Invalid token',
+      error: error.message 
+    });
+  }
+};
+
+// Helper function to broadcast messages to all connected clients
+const broadcastToProject = (projectId, event, data) => {
+  const connections = activeConnections.get(projectId);
+  if (!connections || connections.size === 0) {
+    console.log(`No active connections for project ${projectId}`);
+    return;
+  }
+  
+  // For WebSocket connections
+  if (io) {
+    io.to(projectId).emit(event, data);
+  }
+  
+  // For SSE connections
+  const sseMessage = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  
+  for (const { res } of connections) {
+    try {
+      if (res && !res.writableEnded) {
+        res.write(sseMessage);
+      }
+    } catch (error) {
+      console.error('Error broadcasting message:', error);
+      // Remove broken connection
+      const updatedConnections = new Set(connections);
+      updatedConnections.delete({ res });
+      activeConnections.set(projectId, updatedConnections);
+    }
+  }
+};
+
+// Chat routes
+router.get('/sse/chat/:projectId', authenticateConnection, async (req, res) => {
+  try {
+    const projectId = req.params.projectId;
+    
+    // Verify user has access to the project
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    // Check if user is a collaborator or the project is public
+    const isCollaborator = project.collaborators.some(
+      collab => collab.user && collab.user.toString() === req.user.userId
+    );
+    
+    if (project.owner.toString() !== req.user.userId && !isCollaborator && !project.isPublic) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // Fetch messages with proper projection
+    const messages = await Message.find(
+      { project: projectId },
+      { 
+        'text': 1,
+        'sender': 1,
+        'createdAt': 1,
+        '_id': 1
+      }
+    )
+    .sort({ createdAt: 1 })
+    .limit(100)
+    .lean(); // Convert to plain JavaScript objects
+    
+    // Ensure consistent message format
+    const formattedMessages = messages.map(msg => ({
+      ...msg,
+      _id: msg._id.toString(),
+      project: projectId,
+      sender: {
+        _id: msg.sender._id?.toString() || req.user.userId,
+        name: msg.sender.name || 'Anonymous',
+        email: msg.sender.email || ''
+      }
+    }));
+    
+    res.json(formattedMessages);
+  } catch (error) {
+    console.error('Error fetching chat history:', error);
+    res.status(500).json({ 
+      message: 'Error fetching chat history',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// Handle chat messages
+router.post('/sse/chat/:projectId', authenticateConnection, async (req, res) => {
+  try {
+    const { text } = req.body;
+    const projectId = req.params.projectId;
+    
+    if (!text || !text.trim()) {
+      return res.status(400).json({ message: 'Message text is required' });
+    }
+    
+    // Verify project exists and user has access
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    // Check if user is a collaborator or the project is public
+    const isCollaborator = project.collaborators.some(
+      collab => collab.user && collab.user.toString() === req.user.userId
+    );
+    
+    if (project.owner.toString() !== req.user.userId && !isCollaborator && !project.isPublic) {
+      return res.status(403).json({ message: 'Access denied' });
+    }
+
+    // Get sender information with fallbacks
+    const senderName = req.user.name || req.user.username || 'Anonymous';
+    // Generate a default email if not provided, using the pattern username@project-id.dev-deck.local
+    const senderEmail = req.user.email || 
+                      `${req.user.username || 'user'}-${Date.now().toString(36)}@project-${projectId}.dev-deck.local`;
+
+    // Create and save the message
+    const message = new Message({
+      text: text.trim(),
+      project: projectId,
+      sender: {
+        _id: req.user.userId,
+        name: senderName,
+        email: senderEmail
+      },
+      createdAt: new Date()
+    });
+
+    await message.save();
+    
+    // Broadcast the new message to all connected clients
+    const messageForClients = message.toObject();
+    messageForClients._id = message._id.toString();
+    
+    // Ensure the message has all required fields
+    const broadcastMessage = {
+      ...messageForClients,
+      sender: {
+        _id: req.user.userId,
+        name: senderName,
+        email: senderEmail
+      },
+      project: projectId,
+      createdAt: message.createdAt
+    };
+    
+    // Broadcast to both WebSocket and SSE clients
+    const io = req.app.get('io');
+    if (io) {
+      io.to(projectId).emit('chatMessage', broadcastMessage);
+    }
+    broadcastToProject(projectId, 'chatMessage', broadcastMessage);
+
+    res.status(201).json(broadcastMessage);
+  } catch (error) {
+    console.error('Error sending message:', error);
+    res.status(500).json({ 
+      message: 'Error sending message',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+
+// SSE endpoint for real-time updates
+router.get("/sse/events/:projectId", authenticateConnection, async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -29,6 +240,41 @@ router.get("/events/:projectId", async (req, res) => {
 
   // Keep connection alive
   res.write(": keep-alive\n\n");
+
+  // Store the connection
+  if (!activeConnections.has(projectId)) {
+    activeConnections.set(projectId, new Set());
+  }
+  
+  const connectionId = Date.now().toString();
+  const connection = { id: connectionId, res, userId: req.user?.userId };
+  activeConnections.get(projectId).add(connection);
+
+  // Send initial connection confirmation
+  try {
+    res.write(`event: connection\ndata: ${JSON.stringify({ status: 'connected' })}\n\n`);
+  } catch (error) {
+    console.error('Error sending connection confirmation:', error);
+  }
+
+  // Remove connection when client disconnects
+  const cleanup = () => {
+    const connections = activeConnections.get(projectId);
+    if (connections) {
+      for (const conn of connections) {
+        if (conn.id === connectionId) {
+          connections.delete(conn);
+          break;
+        }
+      }
+      if (connections.size === 0) {
+        activeConnections.delete(projectId);
+      }
+    }
+  };
+
+  req.on('close', cleanup);
+  req.on('error', cleanup);
 
   const sendEvent = (data, event = "message") => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);

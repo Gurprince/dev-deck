@@ -10,3 +10,5 @@ backend/.env
 # Build
 dist/
 build/
+
+text.text

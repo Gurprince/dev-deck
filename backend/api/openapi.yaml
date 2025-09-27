@@ -1,0 +1,105 @@
+openapi: 3.0.0
+info:
+  title: DevDeck API
+  description: |
+    This is the API documentation for DevDeck, a next-gen developer playground.
+    The API allows you to manage projects, collaborate in real-time, and build APIs.
+  version: 1.0.0
+  contact:
+    email: support@devdeck.example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+servers:
+  - url: http://localhost:3000/api
+    description: Development server
+  - url: https://api.devdeck.example.com
+    description: Production server
+
+tags:
+  - name: Projects
+    description: Operations related to projects
+  - name: Authentication
+    description: User authentication and authorization
+  - name: Collaboration
+    description: Real-time collaboration features
+  - name: Documentation
+    description: API documentation endpoints
+
+paths:
+  /projects:
+    get:
+      tags: [Projects]
+      summary: Get all projects
+      description: Returns a list of projects for the authenticated user
+      responses:
+        '200':
+          description: A list of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+    post:
+      tags: [Projects]
+      summary: Create a new project
+      description: Creates a new project with the provided details
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NewProject'
+      responses:
+        '201':
+          description: Project created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Project'
+
+components:
+  schemas:
+    Project:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The unique identifier for the project
+        name:
+          type: string
+          description: The name of the project
+        description:
+          type: string
+          description: A brief description of the project
+        createdAt:
+          type: string
+          format: date-time
+          description: The date and time when the project was created
+        updatedAt:
+          type: string
+          format: date-time
+          description: The date and time when the project was last updated
+
+    NewProject:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: The name of the project
+        description:
+          type: string
+          description: A brief description of the project
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []

@@ -1,0 +1,236 @@
+Step 2 – Core Layout
+
+Build Navbar.jsx → just a header for now.
+
+Create Dashboard.jsx page (workspace container).
+
+Add placeholder panels: Editor, RoutePanel, TestPanel, LogsPanel.
+
+Layout: Flexbox/grid (Editor left, Panels right).
+
+✅ Output: UI skeleton with dummy panels.
+
+Step 3 – Monaco Editor Integration
+
+Add Editor.jsx using @monaco-editor/react.
+
+State management: Keep editor code in ProjectContext.
+
+Show default Express.js boilerplate in editor (e.g., simple app.get("/")).
+
+✅ Output: You can type code and store it in context.
+
+Step 4 – Route Detection Panel (Stub First)
+
+Build RoutePanel.jsx → list of routes.
+
+For now, use mock data:
+
+[{ method: "GET", path: "/hello" }, { method: "POST", path: "/data" }]
+
+
+Later, connect it to backend parser API.
+
+✅ Output: Routes appear when mock data is fed.
+
+Step 5 – Testing Panel (Stub First)
+
+Build TestPanel.jsx → mini form (method dropdown, URL input, body editor, send button).
+
+Use Axios to send requests (for now, hit dummy endpoints).
+
+Show response JSON below.
+
+✅ Output: Users can “send” test requests (mock for now).
+
+Step 6 – Logs Panel (Stub First)
+
+Build LogsPanel.jsx → scrollable area.
+
+Mock logs (e.g., console.log("Server running")).
+
+Add auto-scroll to bottom.
+
+✅ Output: Fake logs show in real-time.
+
+Step 7 – Connect Panels Together
+
+Wire up context so Editor updates → Route Panel + Test Panel share state.
+
+Keep a ProjectContext.js to manage:
+
+code (editor value)
+
+routes (parsed routes)
+
+logs (incoming log lines)
+
+✅ Output: A working frontend-only prototype (no backend yet).
+
+Step 8 – Backend Integration (Later)
+
+Swap stubs with real backend APIs:
+
+parserService.js → detect routes from AST.
+
+testService.js → send requests to sandbox.
+
+projectService.js → save/load project.
+
+useLogs hook → subscribe to SSE logs.
+
+✅ Output: Full MVP frontend + backend working.
+
+
+
+
+
+
+
+
+
+
+
+
+server.js 
+
+import express from 'express';
+import http from 'http';
+import { Server } from 'socket.io';
+import mongoose from 'mongoose';
+import cors from 'cors';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { setupSocketIO } from './config/socket.js';
+import apiRoutes from './routes/api.js';
+import projectRoutes from './routes/projectRoutes.js';
+import authRoutes from './routes/auth.js';
+import { errorHandler } from './middleware/errorHandler.js';
+
+// Load environment variables
+dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Initialize Express app
+const app = express();
+const server = http.createServer(app);
+
+// WebSocket setup
+const io = new Server(server, {
+  cors: {
+    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    methods: ['GET', 'POST'],
+    credentials: true
+  }
+});
+
+// CORS configuration
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  process.env.FRONTEND_URL
+].filter(Boolean);
+
+// Enable CORS for all routes
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (allowedOrigins.includes(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+    
+    // Handle preflight requests
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
+  }
+  
+  next();
+});
+
+// Parse JSON bodies with increased limit
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Log all requests for debugging
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url}`, req.body);
+  next();
+});
+
+// Static files (for production)
+if (process.env.NODE_ENV === 'production') {
+  app.use(express.static(join(__dirname, '../../frontend/dist')));
+}
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok' });
+});
+
+// Test route
+app.get('/api/test', (req, res) => {
+  res.json({ message: 'API is working!' });
+});
+
+// API Routes - test route first
+app.get('/api/test', (req, res) => {
+  console.log('Test route hit!');
+  res.json({ message: 'API is working!' });
+});
+
+// Mount all API routes
+console.log('Mounting API routes...');
+app.use('/api/auth', authRoutes);
+app.use('/api/projects', projectRoutes);
+app.use('/api', apiRoutes);
+
+// Log all routes for debugging
+const routes = [];
+app._router.stack.forEach((middleware) => {
+  if (middleware.route) {
+    // Routes registered directly on the app
+    routes.push(`${Object.keys(middleware.route.methods).join(', ')} -> ${middleware.route.path}`);
+  } else if (middleware.name === 'router') {
+    // Routes registered on router
+    middleware.handle.stack.forEach((handler) => {
+      if (handler.route) {
+        routes.push(`${Object.keys(handler.route.methods).join(', ')} -> ${handler.route.path}`);
+      }
+    });
+  }
+});
+console.log('Registered routes:', routes);
+
+// Serve frontend in production
+if (process.env.NODE_ENV === 'production') {
+  app.get('*', (req, res) => {
+    res.sendFile(join(__dirname, '../../frontend/dist/index.html'));
+  });
+}
+
+// Error handling middleware
+app.use(errorHandler);
+
+// MongoDB connection
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/devdeck';
+
+mongoose.connect(MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
+.then(() => console.log('MongoDB connected'))
+.catch(err => console.error('MongoDB connection error:', err));
+
+// Setup Socket.IO
+setupSocketIO(io);
+
+// Start server
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});

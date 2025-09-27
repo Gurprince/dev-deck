@@ -9,18 +9,32 @@ export const SocketProvider = ({ children }) => {
   const { isAuthenticated, user } = useAuth();
 
   useEffect(() => {
-    if (isAuthenticated && !socket) {
-      // Initialize socket connection
-      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
-      const wsBase = import.meta.env.VITE_API_WS || apiBase.replace(/\/api\/?$/, '');
+    if (isAuthenticated) {
+      // Get auth token
+      const token = localStorage.getItem('token');
+      if (!token) {
+        console.error('No authentication token found');
+        return;
+      }
+
+      // Initialize socket connection with auth token
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+      const wsBase = import.meta.env.VITE_API_WS || apiBase;
+      
       const newSocket = io(wsBase, {
         path: '/socket.io',
-        transports: ['websocket'],
+        transports: ['websocket', 'polling'],
         autoConnect: true,
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
         withCredentials: true,
+        auth: {
+          token: token
+        },
+        query: {
+          token: token
+        }
       });
 
       newSocket.on('connect', () => {

@@ -89,7 +89,42 @@ const broadcastToProject = (projectId, event, data, io = null) => {
 };
 
 // Chat routes
-router.get('/sse/chat/:projectId', authenticateConnection, async (req, res) => {
+router.post('/chat/:projectId', authenticateConnection, async (req, res) => {
+  try {
+    const { text, sender } = req.body;
+    const projectId = req.params.projectId;
+    
+    if (!text || !text.trim()) {
+      return res.status(400).json({ message: 'Message text is required' });
+    }
+
+    // Create a new message
+    const message = new Message({
+      text: text.trim(),
+      project: projectId,
+      sender: {
+        _id: req.user.userId,
+        name: req.user.name,
+        email: req.user.email
+      },
+      isSystem: false
+    });
+
+    // Save the message to the database
+    await message.save();
+
+    // Broadcast the message to all connected clients
+    broadcastToProject(projectId, 'chat-message', message);
+
+    res.status(201).json(message);
+  } catch (error) {
+    console.error('Error sending chat message:', error);
+    res.status(500).json({ message: 'Failed to send message', error: error.message });
+  }
+});
+
+// Get chat history
+router.get('/chat/:projectId', authenticateConnection, async (req, res) => {
   try {
     const projectId = req.params.projectId;
     

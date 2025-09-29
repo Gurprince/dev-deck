@@ -1,19 +1,21 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '../../context/SocketContext';
 import { useAuth } from '../../context/AuthContext';
+import { useChat } from '../../context/ChatContext';
 import { ChatBubbleLeftRightIcon, PaperAirplaneIcon, XMarkIcon, TrashIcon } from '@heroicons/react/24/outline';
 import UserAvatar from '../common/UserAvatar';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'react-hot-toast';
 
 const ChatPanel = ({ projectId, isOpen, onClose }) => {
-  const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [isLoading, setIsLoading] = useState(true);
-  const { socket } = useSocket();
+  const { socket, sendChatMessage } = useSocket();
   const { user } = useAuth();
   const [isClearing, setIsClearing] = useState(false);
   const messagesEndRef = useRef(null);
+  const { getMessages, addMessage, updateMessage, clearMessages } = useChat();
+  const [messages, setMessages] = useState([]);
   // Ensure the API base URL ends with /api
   const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
   const apiBase = baseUrl.endsWith('/api') ? baseUrl : `${baseUrl}/api`;
@@ -32,13 +34,19 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
   const fetchChatHistory = useCallback(async () => {
     if (!projectId) return;
     
+    const projectIdStr = String(projectId);
+    const cachedMessages = getMessages(projectIdStr);
+    
+    if (cachedMessages.length > 0) {
+      setMessages(cachedMessages);
+      setIsLoading(false);
+      return;
+    }
+    
     const token = getAuthToken();
     if (!token) return;
     
     try {
-      // Ensure projectId is a string
-      const projectIdStr = String(projectId);
-      
       const response = await fetch(`${apiBase}/sse/chat/${projectIdStr}?token=${encodeURIComponent(token)}`, {
         method: 'GET',
         headers: {
@@ -60,19 +68,25 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
       }
       
       const data = await response.json();
-      setMessages(Array.isArray(data) ? data : []);
+      const messages = Array.isArray(data) ? data : [];
+      
+      // Add messages to context
+      messages.forEach(msg => addMessage(projectIdStr, msg));
+      setMessages(messages);
+      
     } catch (error) {
       console.error('Error fetching chat history:', error);
       toast.error(error.message || 'Failed to load chat history');
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, apiBase]);
+  }, [projectId, apiBase, getMessages, addMessage]);
 
   useEffect(() => {
+    if (isOpen) {
       fetchChatHistory();
-    }, [fetchChatHistory, isOpen]);
-
+    }
+  }, [fetchChatHistory, isOpen]);
   // Function to clear chat history
   const clearChatHistory = async () => {
     console.log('clearChatHistory called');
@@ -81,11 +95,13 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
       toast.error('No project ID available');
       return;
     }
-
+    
+    const projectIdStr = String(projectId);
+    clearMessages(projectIdStr);
+    
     if (!window.confirm('Are you sure you want to clear the chat history? This action cannot be undone.')) {
       return;
     }
-
     const token = getAuthToken();
     if (!token) {
       console.error('No authentication token found');
@@ -157,90 +173,101 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
     }
   };
 
-  useEffect(() => {
-    if (!socket || !projectId) return;
-    
-    // Ensure projectId is a string
+  // Handle new message
+  const handleNewMessage = useCallback((incomingMessage) => {
+    if (!incomingMessage || !incomingMessage.text || !projectId) {
+      console.error('Invalid message or missing project ID');
+      return;
+    }
+
     const projectIdStr = String(projectId);
     
-    const joinProject = () => {
-      if (socket.connected) {
-        console.log('Joining project room:', projectIdStr);
-        socket.emit('joinProject', { projectId: projectIdStr, userId: user?.id });
-      }
-    };
+    // Generate a stable ID for the message if it doesn't have one
+    const messageId = incomingMessage._id || `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
-    // Handle chat cleared event
-    const handleChatCleared = (data) => {
-      console.log('Chat cleared event received:', data);
-      if (data.projectId === projectIdStr) {
-        setMessages([]);
-        toast.success('Chat history cleared', { duration: 3000 });
-      }
+    // Normalize the message
+    const normalizedMessage = {
+      ...incomingMessage,
+      _id: messageId,
+      text: incomingMessage.text,
+      project: projectIdStr,
+      projectId: projectIdStr,
+      sender: {
+        _id: incomingMessage.sender?._id || incomingMessage.senderId || 'unknown',
+        name: incomingMessage.sender?.name || incomingMessage.senderName || 'Unknown User',
+        username: incomingMessage.sender?.username || incomingMessage.senderName?.toLowerCase().replace(/\\s+/g, '_') || 'user',
+        email: incomingMessage.sender?.email || incomingMessage.senderEmail || ''
+      },
+      senderId: incomingMessage.sender?._id || incomingMessage.senderId || 'unknown',
+      senderName: incomingMessage.sender?.name || incomingMessage.senderName || 'Unknown User',
+      senderEmail: incomingMessage.sender?.email || incomingMessage.senderEmail || '',
+      createdAt: incomingMessage.createdAt || new Date().toISOString(),
+      timestamp: incomingMessage.timestamp || new Date(incomingMessage.createdAt || new Date()).getTime(),
+      isSending: incomingMessage.isSending || false
     };
 
-    const handleNewMessage = (incomingMessage) => {
-      console.log('New message received:', incomingMessage);
-      console.log('Current user ID:', user?.id);
-      
-      // Ensure the message is for the current project
-      const messageProjectId = incomingMessage.project || incomingMessage.projectId;
-      if (messageProjectId !== projectIdStr) {
-        console.log('Message for different project, ignoring:', messageProjectId, '!=', projectIdStr);
-        return;
-      }
-      
-      // Create a normalized message with consistent structure
-      const normalizedMessage = {
-        ...incomingMessage,
-        // Always use the most complete sender information available
-        sender: {
-          // Prefer the nested sender object if available
-          ...(typeof incomingMessage.sender === 'object' && incomingMessage.sender !== null ? incomingMessage.sender : {}),
-          // Fall back to top-level fields if needed
-          _id: incomingMessage.sender?._id || incomingMessage.senderId || incomingMessage.sender?._id || 'unknown',
-          name: incomingMessage.sender?.name || incomingMessage.senderName || 'User',
-          email: incomingMessage.sender?.email || incomingMessage.senderEmail || '',
-          username: incomingMessage.sender?.username || ''
-        },
-        _id: incomingMessage._id || `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        createdAt: incomingMessage.createdAt || new Date().toISOString()
-      };
-      
-      console.log('Processing message:', {
-        rawMessage: incomingMessage,
-        normalizedMessage,
-        currentUser: user?.id,
-        isFromCurrentUser: normalizedMessage.sender?._id?.toString() === user?.id?.toString()
-      });
-      
-      setMessages(prev => {
-        // Check if message already exists to prevent duplicates
-        const exists = prev.some(m => {
-          const sameId = m._id === normalizedMessage._id;
-          const sameContent = m.text === normalizedMessage.text && 
-                            m.sender?._id === normalizedMessage.sender?._id &&
-                            Math.abs(new Date(m.createdAt) - new Date(normalizedMessage.createdAt)) < 5000;
-          return sameId || sameContent;
-        });
-        
-        if (exists) {
-          console.log('Duplicate message detected, skipping');
-          return prev;
-        }
-        
-        // Replace any temporary messages with the same content from the same user
-        const updatedMessages = prev.filter(m => 
-          !(m.isSending && 
-            m.text === normalizedMessage.text && 
-            m.sender?._id === normalizedMessage.sender?._id)
-        );
-        
-        return [...updatedMessages, normalizedMessage];
-      });
-    };
+    // Always use updateMessage which will handle both new and existing messages
+    updateMessage(projectIdStr, messageId, normalizedMessage);
     
-    // Set up socket event listeners
+    // Update local state to ensure immediate UI update
+    setMessages(prev => {
+      // Check if this is a new message or an update to an existing one
+      const existingIndex = prev.findIndex(m => m._id === messageId);
+      
+      if (existingIndex >= 0) {
+        // Update existing message
+        const updatedMessages = [...prev];
+        updatedMessages[existingIndex] = { ...normalizedMessage };
+        return updatedMessages;
+      } else {
+        // Add new message
+        return [...prev, normalizedMessage];
+      }
+    });
+  }, [projectId, updateMessage]);
+
+  // Handle chat cleared event
+  const handleChatCleared = useCallback((data) => {
+    if (!projectId) return;
+    
+    const projectIdStr = String(projectId);
+    if (data.projectId === projectIdStr) {
+      setMessages([]);
+      clearMessages(projectIdStr);
+      toast.success('Chat history cleared', { duration: 3000 });
+    }
+  }, [projectId, clearMessages]);
+  
+  // Join project room
+  const joinProject = useCallback(() => {
+    if (!socket || !projectId) return;
+    
+    const projectIdStr = String(projectId);
+    
+    if (socket.connected) {
+      console.log('Joining project room:', projectIdStr);
+      socket.emit('joinProject', { 
+        projectId: projectIdStr, 
+        userId: user?.id,
+        username: user?.username || user?.email?.split('@')[0] || 'user'
+      }, (response) => {
+        console.log('Join project response:', response);
+      });
+    } else {
+      console.log('Socket not connected, cannot join project');
+    }
+  }, [socket, projectId, user?.id, user?.username, user?.email]);
+
+  // Set up socket listeners
+  useEffect(() => {
+    if (!socket || !projectId) {
+      console.log('Socket or projectId not available', { hasSocket: !!socket, projectId });
+      return;
+    }
+    
+    const projectIdStr = String(projectId);
+    
+    // Set up event listeners
     socket.on('connect', joinProject);
     socket.on('chatMessage', handleNewMessage);
     socket.on('chat_cleared', handleChatCleared);
@@ -260,7 +287,7 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
         socket.emit('leaveProject', { projectId: projectIdStr, userId: user?.id });
       }
     };
-  }, [socket, projectId, user?.id]);
+  }, [socket, projectId, user?.id, joinProject, handleNewMessage, handleChatCleared]);
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -269,63 +296,76 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !projectId) return;
-
-    const token = getAuthToken();
-    if (!token) return;
+    if (!newMessage.trim() || !projectId || !socket) return;
 
     try {
-      // Ensure projectId is a string
       const projectIdStr = String(projectId);
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const timestamp = new Date().toISOString();
       
       // Create a temporary message for immediate UI feedback
       const tempMessage = {
-        _id: `temp-${Date.now()}`,
+        _id: tempId,
         text: newMessage,
         project: projectIdStr,
+        projectId: projectIdStr,
         sender: {
           _id: user?.id,
           name: user?.name || user?.username || 'You',
-          email: user?.email || ''
+          email: user?.email || '',
+          username: user?.username || user?.email?.split('@')[0] || 'user'
         },
-        createdAt: new Date().toISOString(),
-        isSending: true
+        senderId: user?.id,
+        senderName: user?.name || user?.username,
+        senderEmail: user?.email,
+        createdAt: timestamp,
+        timestamp: new Date(timestamp).getTime(),
+        isSending: true,
+        isTemporary: true
       };
       
-      // Add the temporary message to the UI immediately
-      setMessages(prev => [...prev, tempMessage]);
+      // Add the temporary message to the context and local state
+      updateMessage(projectIdStr, tempId, tempMessage);
+      
+      // Clear the input field
+      setNewMessage('');
       
       // Scroll to the bottom to show the new message
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       
-      // Send the message to the server
-      const response = await fetch(`${apiBase}/sse/chat/${projectIdStr}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
+      // Prepare the message to send
+      const messageToSend = {
+        _id: tempId, // Use the same ID as the temp message
+        text: newMessage,
+        projectId: projectIdStr,
+        sender: {
+          _id: user?.id,
+          name: user?.name || user?.username || 'You',
+          email: user?.email || `${user?.id}@dev-deck.local`,
+          username: user?.username || user?.email?.split('@')[0] || 'user'
         },
-        credentials: 'include',
-        body: JSON.stringify({ 
-          text: newMessage,
-          project: projectIdStr, // Ensure project ID is included in the body
-          sender: {
-            _id: user?.id,
-            name: user?.name || user?.username,
-            email: user?.email
-          }
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || 'Failed to send message');
+        createdAt: timestamp,
+        timestamp: new Date(timestamp).getTime()
+      };
+      
+      console.log('Sending chat message:', messageToSend);
+      
+      try {
+        // Send the message via WebSocket
+        sendChatMessage(messageToSend);
+      } catch (error) {
+        console.error('Error sending message:', error);
+        // Update the message to show it failed to send
+        updateMessage(projectIdStr, tempId, {
+          ...tempMessage,
+          isSending: false,
+          error: 'Failed to send message'
+        });
+        toast.error('Failed to send message');
       }
-
-      setNewMessage('');
     } catch (error) {
-      console.error('Error sending message:', error);
-      toast.error(error.message || 'Failed to send message');
+      console.error('Error in handleSendMessage:', error);
+      toast.error(error.message || 'An error occurred while sending the message');
     }
   };
 

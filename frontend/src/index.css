@@ -1,1 +1,18 @@
 @import "tailwindcss";
+/* Add this to your global CSS or component's CSS module */
+pre {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin: 0;
+    font-family: 'Fira Code', 'Courier New', monospace;
+  }
+  
+  /* Add this if you want to style the output differently */
+  .output-container {
+    background-color: #1e1e1e;
+    color: #4ec9b0;
+    padding: 1rem;
+    border-top: 1px solid #333;
+    max-height: 30vh;
+    overflow-y: auto;
+  }

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { ChatProvider } from './context/ChatContext';
 import AppLayout from './components/layout/AppLayout';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
@@ -58,7 +59,6 @@ const PublicRoute = ({ children }) => {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/projects" replace />;
   }
 
   return children;
@@ -66,14 +66,15 @@ const PublicRoute = ({ children }) => {
 
 const App = () => {
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100">
-      <Routes>
-        {/* Public routes */}
-        <Route path="/login" element={
-          <PublicRoute>
-            <LoginPage />
+    <ChatProvider>
+      <div className="min-h-screen bg-gray-50 text-slate-100">
+        <Routes>
+          {/* Public routes */}
+          <Route path="/login" element={
+            <PublicRoute>
+              <LoginPage />
           </PublicRoute>
-        } />
+          } />
         <Route path="/register" element={
           <PublicRoute>
             <RegisterPage />
@@ -95,7 +96,8 @@ const App = () => {
         {/* 404 route */}
         <Route path="*" element={<NotFoundPage />} />
       </Routes>
-    </div>
+    </div> 
+    </ChatProvider>
   );
 };
 

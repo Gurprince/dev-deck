@@ -3,13 +3,16 @@ import express from "express";
 import cors from "cors";
 import { Server } from "socket.io";
 import { createServer } from "node:http";
+import path from "path";
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
+import Project from "./models/Project.js";
 import User from "./models/User.js";
 import Message from "./models/Message.js";
-import jwt from "jsonwebtoken";
+import helmet from "helmet";
+import compression from "compression";
 import { connectDB } from "./config/db.js";
-import Project from "./models/Project.js";
 import errorHandler from "./middleware/errorHandler.js";
 import projectRoutes from "./routes/projectRoutes.js";
 import sseRoutes from "./routes/sseRoutes.js";
@@ -17,115 +20,137 @@ import authRoutes from "./routes/auth.js";
 import apiRoutes from "./routes/api.js";
 import usersRoutes from "./routes/users.js";
 import swaggerDocs from "./config/swagger.js";
+import { rateLimit as customRateLimit } from './middleware/rateLimit.js';
 
+// Initialize express app and HTTP server
 const app = express();
 const server = createServer(app);
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Security and performance middleware
+app.use(helmet()); // Add security headers
+app.use(compression()); // Compress responses
+app.use(express.json({ limit: '10kb' })); // Limit JSON body size
+app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+
+// Apply custom rate limiting to the execute endpoint
+app.use('/api/execute', customRateLimit);
 
 // CORS configuration
-const whitelist = [
+const allowedOrigins = [
   "http://localhost:5173",
   "http://127.0.0.1:5173",
-  process.env.FRONTEND_URL,
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "https://dev-deck-app.vercel.app",
+  "https://dev-deck-git-main-gurprinces-projects.vercel.app",
+  "https://dev-deck-1r9p1q7b2-gurprinces-projects.vercel.app",
+  "https://dev-deck.vercel.app",
+  process.env.FRONTEND_URL
 ].filter(Boolean);
 
-const corsOptions = {
-  origin: (origin, callback) => {
-    // Allow same-origin (no origin header) and whitelisted origins
-    if (!origin || whitelist.includes(origin)) {
-      return callback(null, true);
-    }
-    return callback(new Error("Not allowed by CORS"));
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: [
-    "Content-Type",
-    "Authorization",
-    "authorization",
-    "X-Requested-With",
-    "x-requested-with",
-  ],
-  optionsSuccessStatus: 204,
-};
-
-// Apply CORS to all routes
-app.use(cors(corsOptions));
-
-// Explicit preflight handler compatible with Express 5 (no wildcard path)
+// Apply CORS middleware with configuration
 app.use((req, res, next) => {
-  if (req.method === "OPTIONS") {
-    const origin = req.headers.origin;
-    if (!origin || whitelist.includes(origin)) {
-      res.header("Access-Control-Allow-Origin", origin || "*");
-      res.header("Vary", "Origin");
-      res.header("Access-Control-Allow-Credentials", "true");
-      res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-      res.header(
-        "Access-Control-Allow-Headers",
-        "Content-Type, Authorization, authorization, X-Requested-With, x-requested-with"
-      );
-      return res.sendStatus(204);
-    }
+  const origin = req.headers.origin;
+  
+  // Check if the origin is in the allowed list or if it's a non-browser request
+  if (allowedOrigins.includes(origin) || !origin) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.header('Access-Control-Allow-Credentials', 'true');
   }
+
+  // Handle preflight requests
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
   next();
 });
-
-// Additionally handle OPTIONS on /api/* via regex to ensure proper headers
-app.options(/^\/api\/.*$/, cors(corsOptions));
-
-// Parse JSON and URL-encoded bodies
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 // API Documentation
 swaggerDocs(app);
 
-// Health check endpoint
+// Health check endpoint (excluded from rate limiting)
 app.get("/health", (req, res) => {
-  res.status(200).json({ status: "ok" });
+  res.status(200).json({ 
+    status: "ok",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    dbStatus: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
+  });
 });
 
-// Make io available in the app
-// app.set('io', io);
+// API Routes with error handling
+const apiRoutesConfig = [
+  { path: "/api/auth", handler: authRoutes },
+  { path: "/api/projects", handler: projectRoutes },
+  { path: "/api/sse", handler: sseRoutes },
+  { path: "/api", handler: apiRoutes },
+  { path: "/api/users", handler: usersRoutes }
+];
 
-// API Routes
-app.use("/api/auth", authRoutes);
-app.use("/api/projects", projectRoutes);
-app.use("/api", sseRoutes);
-app.use("/api", apiRoutes);
-app.use("/api/users", usersRoutes);
+apiRoutesConfig.forEach(route => {
+  app.use(route.path, (req, res, next) => {
+    Promise.resolve(route.handler(req, res, next))
+      .catch(next);
+  });  
+});
 
-// Make io globally available
-let io;
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ 
+    status: 'error',
+    message: `Cannot ${req.method} ${req.originalUrl}` 
+  });
+});
 
-// WebSocket setup
-io = new Server(server, {
+// Initialize Socket.IO with optimized settings
+const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-      process.env.FRONTEND_URL,
-    ].filter(Boolean),
+    origin: allowedOrigins,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "authorization"],
-    credentials: true,
+    allowedHeaders: ["Content-Type", "Authorization", "authorization", "x-requested-with"],
+    credentials: true
   },
+  // Optimizations
+  pingTimeout: 30000, // 30 seconds
+  pingInterval: 25000, // 25 seconds
+  maxHttpBufferSize: 1e8, // 100MB
+  transports: ['websocket', 'polling'],
+  allowUpgrades: true,
+  perMessageDeflate: false,
   path: "/socket.io/",
   serveClient: false,
   allowEIO3: true,
-  connectTimeout: 45000,
+  connectTimeout: 30000,
+  httpCompression: true,
+  cookie: false
 });
 
 // Make io available to other modules
 app.set('io', io);
+
+// In-memory collaborators per project
+const collaboratorsByProject = new Map();
+
+// Helper to get or create project collaborators list
+const getOrCreateProjectCollaborators = (projectId) => {
+  if (!collaboratorsByProject.has(projectId)) {
+    collaboratorsByProject.set(projectId, []);
+  }
+  return collaboratorsByProject.get(projectId);
+};
 
 // Socket.IO authentication middleware
 io.use(async (socket, next) => {
   try {
     // Try to get token from auth, query, or headers
     const token = socket.handshake.auth?.token ||
-                 socket.handshake.query?.token ||
-                 (socket.handshake.headers.authorization || '').split(' ')[1];
+                socket.handshake.query?.token ||
+                (socket.handshake.headers.authorization || '').split(' ')[1];
 
     if (!token) {
       console.log('No token provided for WebSocket connection');
@@ -158,20 +183,7 @@ io.use(async (socket, next) => {
         username: user.username || user.email?.split('@')[0] || 'user'
       };
       
-      console.log('WebSocket authenticated user:', {
-        userId: socket.user.userId,
-        name: socket.user.name,
-        email: socket.user.email
-      });
-      
-      console.log(`User authenticated via WebSocket:`, {
-        userId: socket.user.userId,
-        name: socket.user.name,
-        email: socket.user.email,
-        socketId: socket.id
-      });
-      
-      console.log(`User authenticated via WebSocket: ${socket.user.userId} (${socket.user.name || socket.user.email})`);
+      console.log(`User authenticated via WebSocket: ${socket.user.userId} (${socket.user.name || socket.user.email})` );
       next();
     } catch (dbError) {
       console.error('Database error during WebSocket auth:', dbError);
@@ -185,17 +197,6 @@ io.use(async (socket, next) => {
     return next(new Error(errorMessage));
   }
 });
-
-// In-memory collaborators per project (do not persist to DB)
-const collaboratorsByProject = new Map();
-
-// Helper to get or create project collaborators list
-const getOrCreateProjectCollaborators = (projectId) => {
-  if (!collaboratorsByProject.has(projectId)) {
-    collaboratorsByProject.set(projectId, []);
-  }
-  return collaboratorsByProject.get(projectId);
-};
 
 // Socket.IO for real-time collaboration
 io.on("connection", (socket) => {
@@ -276,7 +277,7 @@ io.on("connection", (socket) => {
           socketId: socket.id,
           joinedAt: new Date(),
           status: 'online',
-          color: `hsl(${Math.floor(Math.random() * 360)}, 70%, 60%)`
+          color: `hsl(${Math.floor(Math.random() * 360)}, 70%, 60%)` 
         };
         
         if (existingUserIndex >= 0) {
@@ -368,31 +369,73 @@ io.on("connection", (socket) => {
   });
   
   // Handle chat messages
-  socket.on('chatMessage', async (data) => {
-    if (!data.projectId || !data.text) return;
+  socket.on('chatMessage', async (data, ack) => {
+    console.log('Received chat message:', data);
+    
+    // Validate required fields
+    if (!data.projectId || !data.text) {
+      const errorMsg = 'Missing required fields in chat message';
+      console.error(errorMsg, { 
+        hasProjectId: !!data.projectId, 
+        hasText: !!data.text 
+      });
+      if (ack && typeof ack === 'function') {
+        ack({ status: 'error', message: errorMsg });
+      }
+      return;
+    }
+    
+    // Validate sender information
+    if (!data.sender || !data.sender._id) {
+      const errorMsg = 'Missing sender information in chat message';
+      console.error(errorMsg, { sender: data.sender });
+      if (ack && typeof ack === 'function') {
+        ack({ status: 'error', message: errorMsg });
+      }
+      return;
+    }
     
     try {
       // Ensure projectId is a string
       const projectId = String(data.projectId);
+      const isTemporaryMessage = data._id && data._id.startsWith('temp-');
       
       // Get user info from the socket (already authenticated)
-      if (!socket.user?.userId) {
-        console.error('No user ID found in socket.user');
+      const userId = socket.user?.userId || data.sender?._id;
+      if (!userId) {
+        const errorMsg = 'No user ID found in socket.user or message data';
+        console.error(errorMsg);
+        if (ack && typeof ack === 'function') {
+          ack({ status: 'error', message: errorMsg });
+        }
         return;
       }
       
-      // Fetch the latest user data from the database to ensure we have the most up-to-date information
-      let user;
-      try {
-        user = await User.findById(socket.user.userId).select('name email username').lean();
-        if (!user) {
-          console.error('User not found in database');
-          return;
+      // Get user data - prefer the data from the message first, then from socket, then fetch from DB
+      let user = {
+        _id: userId,
+        name: data.sender?.name || socket.user?.name,
+        email: data.sender?.email || socket.user?.email,
+        username: data.sender?.username || socket.user?.username
+      };
+      
+      // If we're missing any required fields, try to fetch from database
+      if (!user.name || !user.email) {
+        try {
+          const dbUser = await User.findById(userId).select('name email username').lean();
+          if (dbUser) {
+            user = { ...user, ...dbUser };
+          }
+        } catch (error) {
+          console.error('Error fetching user data:', error);
+          // Continue with partial user data
         }
-      } catch (error) {
-        console.error('Error fetching user data:', error);
-        return;
       }
+      
+      // Ensure we have all required fields
+      if (!user.name) user.name = 'Anonymous';
+      if (!user.email) user.email = `${user._id}@dev-deck.local`;
+      if (!user.username) user.username = user.name?.toLowerCase().replace(/\s+/g, '_') || 'user';
       
       // Prepare sender info with proper fallbacks
       const senderInfo = {
@@ -402,32 +445,56 @@ io.on("connection", (socket) => {
         email: user.email || ''
       };
       
-      // Log the user data for debugging
-      console.log('User data from database:', {
-        name: user.name,
-        username: user.username,
-        email: user.email,
-        _id: user._id
-      });
-      
-      console.log('Prepared sender info:', senderInfo);
-      
-      console.log('Sending message with sender info:', senderInfo);
-      
-      // Create and save the message
-      const message = new Message({
-        _id: data._id || `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        text: data.text,
-        project: projectId,
-        sender: user._id, // Use the user ID from the fetched user data
-        senderInfo: senderInfo,
-        createdAt: new Date()
-      });
-      
-      await message.save();
+      // For temporary messages, don't save to database, just broadcast
+      let message;
+      if (isTemporaryMessage) {
+        console.log('Processing temporary message, not saving to database');
+        message = {
+          _id: data._id,
+          text: data.text,
+          project: projectId,
+          sender: user._id,
+          senderInfo: {
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            username: user.username
+          },
+          createdAt: data.createdAt ? new Date(data.createdAt) : new Date(),
+          isTemporary: true
+        };
+      } else {
+        // For non-temporary messages, save to database
+        try {
+          message = new Message({
+            text: data.text,
+            project: projectId,
+            sender: user._id,
+            senderInfo: {
+              _id: user._id,
+              name: user.name,
+              email: user.email,
+              username: user.username
+            },
+            createdAt: data.createdAt ? new Date(data.createdAt) : new Date()
+          });
+          
+          await message.save();
+          console.log('Message saved to database:', message._id);
+        } catch (saveError) {
+          console.error('Error saving message to database:', saveError);
+          if (ack && typeof ack === 'function') {
+            ack({ 
+              status: 'error', 
+              message: 'Failed to save message',
+              error: saveError.message
+            });
+          }
+          return;
+        }
+      }
       
       // Prepare the complete message object for broadcasting
-      // Use the senderInfo we already have to ensure consistency
       const completeMessage = {
         _id: message._id.toString(),
         text: message.text,
@@ -435,90 +502,84 @@ io.on("connection", (socket) => {
         projectId: projectId,
         createdAt: message.createdAt,
         timestamp: message.createdAt ? new Date(message.createdAt).getTime() : Date.now(),
-        
-        // Sender information - use the senderInfo we prepared earlier
         sender: {
           _id: senderInfo._id,
           name: senderInfo.name,
           username: senderInfo.username,
           email: senderInfo.email
         },
-        
-        // For backward compatibility
         senderId: senderInfo._id,
         senderName: senderInfo.name,
         senderEmail: senderInfo.email
       };
       
-      // Log the complete message before broadcasting
-      console.log('Broadcasting message with sender info:', {
-        messageId: completeMessage._id,
-        sender: completeMessage.sender,
-        projectId: projectId,
-        text: completeMessage.text.substring(0, 50) + (completeMessage.text.length > 50 ? '...' : '')
-      });
+      // Broadcast to all clients in the project room (including the sender)
+      console.log('Broadcasting chat message to room:', projectId, completeMessage);
+      io.to(projectId).emit('chatMessage', completeMessage);
       
-      try {
-        // Broadcast to all clients in the project room (including the sender)
-        io.to(projectId).emit('chatMessage', completeMessage);
-        
-        console.log(`Message broadcast to room ${projectId}`);
-        
-        // Log the message for debugging
-        console.log('Message sent to room:', {
-          projectId: projectId,
-          messageId: completeMessage._id,
-          senderId: completeMessage.sender._id,
-          senderName: completeMessage.sender.name,
-          senderEmail: completeMessage.sender.email,
-          text: completeMessage.text.substring(0, 50) + (completeMessage.text.length > 50 ? '...' : '')
+      // Send acknowledgment back to sender if callback was provided
+      if (ack && typeof ack === 'function') {
+        ack({ 
+          status: 'success', 
+          message: 'Message sent successfully',
+          messageId: completeMessage._id
         });
-      } catch (error) {
-        console.error('Error broadcasting message:', error);
       }
     } catch (error) {
       console.error('Error in chatMessage handler:', error);
     }
   });
+});
 
-  // Handle disconnection
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
-    // Clean up from all project rooms
-    collaboratorsByProject.forEach((users, projectId) => {
-      const updatedUsers = users.filter(u => u.socketId !== socket.id);
-      if (updatedUsers.length !== users.length) {
-        collaboratorsByProject.set(projectId, updatedUsers);
-        // Notify remaining users in the room
-        io.to(projectId).emit('collaborator-update', updatedUsers);
-      }
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error('Global error handler:', err);
+  
+  // Handle JWT errors
+  if (err.name === 'JsonWebTokenError') {
+    return res.status(401).json({ 
+      status: 'error',
+      message: 'Invalid token' 
     });
+  }
+  
+  // Handle validation errors
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({
+      status: 'error',
+      message: 'Validation error',
+      errors: Object.values(err.errors).map(e => e.message)
+    });
+  }
+  
+  // Default error response
+  const statusCode = err.statusCode || 500;
+  res.status(statusCode).json({
+    status: 'error',
+    message: err.message || 'Internal Server Error',
+    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
   });
 });
 
-// Expose io to routes
-app.set("io", io);
-
-// Error handling middleware (centralized)
-app.use(errorHandler);
-
+// Start the server
 const startServer = async () => {
   try {
     console.log("Attempting to connect to MongoDB...");
     await connectDB();
     console.log("MongoDB connected successfully");
 
-    // Ensure indexes match the current schema (drops obsolete ones like { user, name })
+    // Ensure indexes match the current schema
     try {
       await Project.syncIndexes();
       console.log("Project indexes synchronized");
     } catch (idxErr) {
       console.error("Failed to sync Project indexes:", idxErr);
     }
+    
     const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
-      console.log(` API Documentation available at http://localhost:${PORT}/api-docs`);
+      console.log(`API Documentation available at http://localhost:${PORT}/api-docs`);
     });
   } catch (error) {
     console.error('Failed to start server:', error);

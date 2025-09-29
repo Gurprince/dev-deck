@@ -138,7 +138,15 @@ export const SocketProvider = ({ children }) => {
   // Send chat message
   const sendChatMessage = (message) => {
     if (socket && message.projectId) {
-      socket.emit('sendChatMessage', message);
+      console.log('Emitting chat message:', message);
+      socket.emit('chatMessage', message, (ack) => {
+        console.log('Message acknowledgment:', ack);
+      });
+    } else {
+      console.error('Cannot send message - socket or projectId missing', { 
+        hasSocket: !!socket, 
+        hasProjectId: !!message?.projectId 
+      });
     }
   };
 

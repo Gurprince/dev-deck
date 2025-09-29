@@ -8,6 +8,7 @@ import { fileURLToPath } from 'url';
 import Project from '../models/Project.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { parseCodeForEndpoints, generateOpenAPISpec } from '../services/parserService.js';
+import { executeCode } from '../services/executionService.js';
 // (deduped)
 
 const router = express.Router();
@@ -298,6 +299,78 @@ router.post('/:projectId/endpoints', authenticateToken, async (req, res, next) =
   } catch (error) {
     next(error);
   }
+});
+
+router.post('/execute', authenticateToken, async (req, res, next) => {
+  try {
+    const { code } = req.body;
+    if (!code) {
+      return res.status(400).json({ message: 'Code is required' });
+    }
+
+    const result = await executeCode(code);
+    res.json(result);
+  } catch (error) {
+    console.error('Execution error:', error);
+    if (error.message.includes('timeout')) {
+      return res.status(408).json({ 
+        message: 'Execution timed out. The code took too long to execute.' 
+      });
+    }
+    if (error.message.includes('memory')) {
+      return res.status(400).json({ 
+        message: 'Execution exceeded memory limits.' 
+      });
+    }
+    if (error.message === 'Rate limit exceeded. Please try again later.') {
+      return res.status(429).json({ 
+        message: error.message 
+      });
+    }
+    next(error);
+  }
+});
+
+// Add this to your api.js routes
+router.post('/stop-execution', authenticateToken, (req, res) => {
+  const { executionId } = req.body;
+  if (!executionId) {
+    return res.status(400).json({ message: 'Execution ID is required' });
+  }
+
+  const server = runningServers.get(executionId);
+  if (!server) {
+    return res.status(404).json({ message: 'No running server found with this ID' });
+  }
+
+  try {
+    killProcess(server.pid);
+    runningServers.delete(executionId);
+    res.json({ success: true, message: 'Server stopped successfully' });
+  } catch (error) {
+    console.error('Error stopping server:', error);
+    res.status(500).json({ message: 'Failed to stop server' });
+  }
+});
+
+// backend/src/routes/api.js
+// Add this new route
+router.get('/execution-status/:executionId', authenticateToken, (req, res) => {
+  const { executionId } = req.params;
+  const server = runningServers.get(executionId);
+  
+  if (!server) {
+    return res.status(404).json({ 
+      isRunning: false,
+      message: 'No running server found with this ID' 
+    });
+  }
+
+  res.json({ 
+    isRunning: true,
+    port: server.port,
+    pid: server.pid
+  });
 });
 
 export default router;

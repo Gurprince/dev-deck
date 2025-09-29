@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+// frontend/src/components/editor/CodeEditor.jsx
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { io } from 'socket.io-client';
 import Editor from '@monaco-editor/react';
 import { useTheme } from '../../context/ThemeContext';
 import { useSocket } from '../../context/SocketContext';
-import { throttle } from 'lodash';
+import { executeCode, stopExecution, executionStore } from '../../services/codeExecutionService';
 import { useAuth } from '../../context/AuthContext';
-import InlineComment from './InlineComment';
+import { Button } from '../ui/Button';
+import { throttle } from 'lodash';
 
 const CodeEditor = ({
   value = '',
@@ -21,15 +24,91 @@ const CodeEditor = ({
   className = '',
 }) => {
   const { theme: appTheme } = useTheme();
-  const { onCodeUpdate, sendCodeUpdate, sendCursorPosition, onCursorPositionUpdate, onCodeComment, sendCodeComment } = useSocket();
   const { user } = useAuth();
+  const socketContext = useSocket();
   const editorRef = useRef(null);
+  const [isExecuting, setIsExecuting] = useState(false);
+  const [output, setOutput] = useState('');
+  const [isServerRunning, setIsServerRunning] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
   const [localValue, setLocalValue] = useState(value);
   const [collaboratorCursors, setCollaboratorCursors] = useState({});
   const [comments, setComments] = useState([]);
   const [activeComment, setActiveComment] = useState(null);
   const [commentPosition, setCommentPosition] = useState({ x: 0, y: 0 });
+  const [socket, setSocket] = useState(null);
+
+  // Initialize socket connection
+  useEffect(() => {
+    let newSocket = socketContext?.socket;
+    
+    if (!newSocket && projectId) {
+      newSocket = io('http://localhost:3001', {
+        query: { projectId },
+        withCredentials: true
+      });
+      setSocket(newSocket);
+    }
+
+    return () => {
+      if (newSocket && !socketContext?.socket) {
+        newSocket.disconnect();
+      }
+    };
+  }, [projectId, socketContext]);
+
+  // WebSocket event handlers
+  const handleCodeUpdate = useCallback((code) => {
+    if (code !== localValue) {
+      setLocalValue(code);
+      onChange(code);
+    }
+  }, [localValue, onChange]);
+
+  const handleCursorUpdate = useCallback((data) => {
+    if (!data?.user?.id || data.user.id === user?.id) return;
+
+    setCollaboratorCursors(prev => ({
+      ...prev,
+      [data.user.id]: {
+        ...data,
+        timestamp: Date.now()
+      }
+    }));
+  }, [user?.id]);
+
+  const handleCommentUpdate = useCallback((data) => {
+    if (data?.comment) {
+      setComments(prev => {
+        const exists = prev.some(c => c.id === data.comment.id);
+        return exists
+          ? prev.map(c => c.id === data.comment.id ? data.comment : c)
+          : [...prev, data.comment];
+      });
+    }
+  }, []);
+
+  // Setup WebSocket listeners
+  useEffect(() => {
+    if (!socket) return;
+
+    const handleConnect = () => {
+      console.log('Connected to WebSocket');
+      socket.emit('join-project', { projectId });
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('code-update', handleCodeUpdate);
+    socket.on('cursor-update', handleCursorUpdate);
+    socket.on('comment-update', handleCommentUpdate);
+
+    return () => {
+      socket.off('connect', handleConnect);
+      socket.off('code-update', handleCodeUpdate);
+      socket.off('cursor-update', handleCursorUpdate);
+      socket.off('comment-update', handleCommentUpdate);
+    };
+  }, [socket, projectId, handleCodeUpdate, handleCursorUpdate, handleCommentUpdate]);
 
   // Handle external value changes
   useEffect(() => {
@@ -38,107 +117,61 @@ const CodeEditor = ({
     }
   }, [value]);
 
-  // Handle real-time collaboration
-  useEffect(() => {
-    if (!projectId || !isMounted) return;
-
-    const handleCodeUpdate = (code) => {
-      if (code !== localValue) {
-        setLocalValue(code);
-        onChange(code);
-      }
-    };
-
-    const cleanup = onCodeUpdate(handleCodeUpdate);
-    return cleanup;
-  }, [projectId, onCodeUpdate, localValue, onChange, isMounted]);
-
-  // Debounce code updates (broadcast to collaborators)
-  useEffect(() => {
-    if (!isMounted) return;
-    
-    const timer = setTimeout(() => {
-      if (projectId && localValue !== value) {
-        sendCodeUpdate(projectId, localValue);
-      }
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, [localValue, projectId, sendCodeUpdate, value, isMounted]);
-
-  // Effect for handling cursor position updates from collaborators
-  useEffect(() => {
-    if (!projectId || !isMounted || !editorRef.current) return;
-
-    const handleCursorUpdate = (data) => {
-      if (data.user.id === undefined) return; // Skip if no user ID
-      
-      setCollaboratorCursors(prev => ({
-        ...prev,
-        [data.user.id]: {
-          ...data,
-          timestamp: Date.now()
-        }
-      }));
-    };
-
-    const cleanup = onCursorPositionUpdate(handleCursorUpdate);
-    
-    // Clean up old cursors after inactivity
-    const cursorCleanupInterval = setInterval(() => {
-      const now = Date.now();
-      setCollaboratorCursors(prev => {
-        const updated = { ...prev };
-        Object.keys(updated).forEach(userId => {
-          if (now - updated[userId].timestamp > 30000) { // Remove after 30 seconds of inactivity
-            delete updated[userId];
-          }
+  // Throttled functions for WebSocket events
+  const throttledSendCodeUpdate = useRef(
+    throttle((code) => {
+      if (socket?.connected) {
+        socket.emit('code-update', { 
+          projectId, 
+          code,
+          userId: user?.id
         });
-        return updated;
-      });
-    }, 10000);
+      }
+    }, 500)
+  ).current;
 
-    return () => {
-      cleanup();
-      clearInterval(cursorCleanupInterval);
-    };
-  }, [projectId, isMounted, onCursorPositionUpdate]);
-
-  // Create throttled cursor position sender
   const throttledSendCursorPosition = useRef(
     throttle((position) => {
-      if (projectId) {
-        sendCursorPosition(projectId, position);
+      if (socket?.connected && user?.id) {
+        socket.emit('cursor-update', { 
+          projectId, 
+          position,
+          user: {
+            id: user.id,
+            name: user.name || user.username || 'Anonymous',
+            color: `hsl(${Math.floor(Math.random() * 360)}, 70%, 60%)`
+          }
+        });
       }
     }, 100)
   ).current;
 
-  // Handle comments
-  useEffect(() => {
-    if (!projectId || !isMounted) return;
+  // Handle editor changes
+  const handleChange = useCallback((newValue) => {
+    setLocalValue(newValue);
+    onChange(newValue);
+    if (projectId) {
+      throttledSendCodeUpdate(newValue);
+    }
+  }, [onChange, projectId, throttledSendCodeUpdate]);
 
-    const handleCommentUpdate = (data) => {
-      if (data.comment) {
-        setComments(prev => {
-          // Update existing comment or add new one
-          const exists = prev.some(c => c.id === data.comment.id);
-          if (exists) {
-            return prev.map(c => c.id === data.comment.id ? data.comment : c);
-          } else {
-            return [...prev, data.comment];
-          }
-        });
-      }
-    };
-
-    const cleanup = onCodeComment(handleCommentUpdate);
-    return cleanup;
-  }, [projectId, isMounted, onCodeComment]);
-
-  // Add comment on selection
-  const addComment = (selection, text) => {
-    if (!projectId || !user) return;
+  // Handle cursor position changes
+  const handleCursorChange = useCallback((e) => {
+    if (!editorRef.current || !projectId || !user?.id) return;
     
+    const position = editorRef.current.getPosition();
+    if (position) {
+      throttledSendCursorPosition({
+        lineNumber: position.lineNumber,
+        column: position.column
+      });
+    }
+  }, [projectId, user?.id, throttledSendCursorPosition]);
+
+  // Add comment handler
+  const addComment = useCallback((selection, text) => {
+    if (!projectId || !user || !socket?.connected) return;
+
     const newComment = {
       id: `comment-${Date.now()}`,
       text,
@@ -156,16 +189,21 @@ const CodeEditor = ({
       },
       replies: []
     };
-    
-    setComments(prev => [...prev, newComment]);
-    sendCodeComment(projectId, newComment);
-    setActiveComment(null);
-  };
 
+    setComments(prev => [...prev, newComment]);
+    socket.emit('comment-update', { 
+      projectId, 
+      comment: newComment,
+      userId: user.id
+    });
+    setActiveComment(null);
+  }, [projectId, user, socket]);
+
+  // Handle editor mount
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
     setIsMounted(true);
-    
+
     // Configure editor options
     editor.updateOptions({
       minimap: { enabled: true },
@@ -176,7 +214,7 @@ const CodeEditor = ({
       formatOnPaste: true,
       formatOnType: true,
     });
-    
+
     // Add context menu for comments
     editor.addAction({
       id: 'add-comment',
@@ -189,7 +227,7 @@ const CodeEditor = ({
           const position = ed.getScrolledVisiblePosition(
             { lineNumber: selection.startLineNumber, column: selection.startColumn }
           );
-          
+
           if (position) {
             const editorDomNode = ed.getDomNode();
             if (editorDomNode) {
@@ -198,8 +236,7 @@ const CodeEditor = ({
                 x: editorCoords.left + position.left,
                 y: editorCoords.top + position.top
               });
-              
-              // Create a new comment
+
               const commentText = prompt('Enter your comment:');
               if (commentText) {
                 addComment(selection, commentText);
@@ -211,91 +248,9 @@ const CodeEditor = ({
     });
 
     // Track cursor position changes
-    editor.onDidChangeCursorPosition((e) => {
-      const position = editor.getPosition();
-      if (position) {
-        throttledSendCursorPosition({
-          lineNumber: position.lineNumber,
-          column: position.column
-        });
-      }
-    });
+    editor.onDidChangeCursorPosition(handleCursorChange);
 
-    // Add decorations for collaborator cursors
-    const updateCursorDecorations = () => {
-      if (!editor) return;
-      
-      // Create decorations for each collaborator cursor
-      Object.values(collaboratorCursors).forEach(cursorData => {
-        const { user, position } = cursorData;
-        if (!position || !user) return;
-        
-        // Create cursor decoration
-        const cursorDecoration = {
-          range: new monaco.Range(
-            position.lineNumber,
-            position.column,
-            position.lineNumber,
-            position.column + 1
-          ),
-          options: {
-            className: 'collaborator-cursor',
-            hoverMessage: { value: user.name || 'Collaborator' },
-            beforeContentClassName: 'collaborator-cursor-before',
-            afterContentClassName: 'collaborator-cursor-after',
-            inlineClassName: 'collaborator-cursor-inline',
-            overviewRuler: {
-              color: user.color || '#007acc',
-              position: monaco.editor.OverviewRulerLane.Full
-            },
-          }
-        };
-        
-        // Apply decoration
-        editor.deltaDecorations([], [cursorDecoration]);
-      });
-    };
-
-    // Update decorations when collaborator cursors change
-      const decorationInterval = setInterval(updateCursorDecorations, 100);
-      
-      // Add decorations for comments
-      const updateCommentDecorations = () => {
-        if (!editor) return;
-        
-        // Create decorations for each comment
-        const decorations = comments.map(comment => {
-          return {
-            range: new monaco.Range(
-              comment.selection.startLineNumber,
-              comment.selection.startColumn,
-              comment.selection.endLineNumber,
-              comment.selection.endColumn
-            ),
-            options: {
-              inlineClassName: 'comment-highlight',
-              hoverMessage: { value: `Comment by ${comment.author.name}: ${comment.text}` },
-              className: 'comment-decoration',
-              overviewRuler: {
-                color: '#FFCC00',
-                position: monaco.editor.OverviewRulerLane.Center
-              },
-              minimap: {
-                color: '#FFCC00',
-                position: monaco.editor.MinimapPosition.Inline
-              }
-            }
-          };
-        });
-        
-        // Apply decorations
-        editor.deltaDecorations([], decorations);
-      };
-      
-      // Update comment decorations when comments change
-      const commentDecorationInterval = setInterval(updateCommentDecorations, 500);
-      
-      // Register custom language if needed
+    // Register custom language if needed
     monaco.languages.register({ id: 'http' });
     monaco.languages.setMonarchTokensProvider('http', {
       defaultToken: '',
@@ -311,16 +266,78 @@ const CodeEditor = ({
     });
 
     onMount(editor, monaco);
-    
-    return () => {
-      clearInterval(decorationInterval);
-      clearInterval(commentDecorationInterval);
-    };
   };
 
-  const handleChange = (newValue) => {
-    setLocalValue(newValue);
-    onChange(newValue);
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      const currentExecution = executionStore.getCurrentExecution();
+      if (currentExecution) {
+        stopExecution(currentExecution.id).catch(console.error);
+        executionStore.clearExecution();
+      }
+      if (socket && !socketContext?.socket) {
+        socket.disconnect();
+      }
+    };
+  }, [socket, socketContext]);
+
+  // Run code execution
+  const handleRunCode = async () => {
+    try {
+      setIsExecuting(true);
+      setOutput('Executing code...\n');
+
+      // Stop any running server first
+      const currentExecution = executionStore.getCurrentExecution();
+      if (currentExecution) {
+        try {
+          await stopExecution(currentExecution.id);
+          executionStore.clearExecution();
+          setOutput(prev => prev + `\nStopped previous server on port ${currentExecution.port}\n`);
+        } catch (error) {
+          console.error('Error stopping previous execution:', error);
+        }
+      }
+
+      const result = await executeCode(localValue);
+      
+      if (result.success) {
+        setOutput(prev => prev + (result.output || '') + '\n');
+        if (result.error) {
+          setOutput(prev => prev + 'Error: ' + result.error + '\n');
+        }
+      } else {
+        setOutput(prev => prev + 'Error: ' + (result.message || 'Execution failed') + '\n');
+      }
+
+      // Check if server was started
+      if (result.output && result.output.includes('SERVER_STARTED:')) {
+        const port = result.output.match(/SERVER_STARTED:(\d+)/)[1];
+        executionStore.setExecution(`exec-${Date.now()}`, port);
+        setIsServerRunning(true);
+      }
+    } catch (error) {
+      console.error('Execution error:', error);
+      setOutput(prev => prev + 'Error: ' + (error.message || 'Failed to execute code') + '\n');
+    } finally {
+      setIsExecuting(false);
+    }
+  };
+
+  const handleStopExecution = async () => {
+    try {
+      const currentExecution = executionStore.getCurrentExecution();
+      if (currentExecution) {
+        await stopExecution(currentExecution.id);
+        executionStore.clearExecution();
+        setIsServerRunning(false);
+        setOutput(prev => prev + `\nServer on port ${currentExecution.port} stopped.\n`);
+      }
+    } catch (error) {
+      console.error('Error stopping execution:', error);
+      setOutput(prev => prev + 'Error stopping server: ' + (error.message || 'Unknown error') + '\n');
+    }
   };
 
   const handleValidate = (markers) => {
@@ -331,50 +348,49 @@ const CodeEditor = ({
   const editorTheme = customTheme || (appTheme === 'dark' ? 'vs-dark' : 'light');
 
   return (
-    <div className={`w-full h-full ${className}`}>
-      <Editor
-        height={height}
-        width={width}
-        language={language}
-        theme={editorTheme}
-        value={localValue}
-        onChange={handleChange}
-        onMount={handleEditorDidMount}
-        onValidate={handleValidate}
-        options={{
-          ...options,
-          readOnly: isReadOnly,
-          selectOnLineNumbers: true,
-          roundedSelection: false,
-          cursorStyle: 'line',
-          automaticLayout: true,
-          fontFamily: 'Fira Code, Menlo, Monaco, "Courier New", monospace',
-          fontLigatures: true,
-          fontSize: 14,
-          lineHeight: 24,
-          hideCursorInOverviewRuler: true,
-          scrollBeyondLastLine: false,
-          renderLineHighlight: 'all',
-          minimap: { enabled: true },
-          quickSuggestions: {
-            other: true,
-            comments: false,
-            strings: true,
-          },
-          wordBasedSuggestions: true,
-          parameterHints: {
-            enabled: true,
-          },
-          suggestOnTriggerCharacters: true,
-          tabSize: 2,
-          insertSpaces: true,
-          autoClosingBrackets: 'always',
-          autoClosingQuotes: 'always',
-          formatOnPaste: true,
-          formatOnType: true,
-          ...options,
-        }}
-      />
+    <div className="flex flex-col h-full">
+      <div className="flex justify-between items-center p-2 bg-gray-100 dark:bg-gray-800">
+        <div className="flex space-x-2">
+          <Button
+            onClick={handleRunCode}
+            disabled={isExecuting}
+            variant="outline"
+            size="sm"
+          >
+            {isExecuting ? 'Running...' : 'Run Code'}
+          </Button>
+          {isServerRunning && (
+            <Button
+              onClick={handleStopExecution}
+              variant="destructive"
+              size="sm"
+            >
+              Stop Server
+            </Button>
+          )}
+        </div>
+        <div className="text-sm text-gray-500">
+          {language.toUpperCase()}
+        </div>
+      </div>
+      <div className="flex-1">
+        <Editor
+          height="70vh"
+          defaultLanguage={language}
+          value={localValue}
+          onChange={handleChange}
+          onCursorPositionChange={handleCursorChange}
+          theme={editorTheme}
+          onMount={handleEditorDidMount}
+          options={{
+            ...options,
+            readOnly: isReadOnly,
+          }}
+        />
+      </div>
+      <div className="h-1/3 bg-gray-900 text-green-400 font-mono text-sm p-4 overflow-auto">
+        <pre>{output}</pre>
+      </div>
     </div>
   );
 };

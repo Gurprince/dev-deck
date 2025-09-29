@@ -51,33 +51,40 @@ const authenticateConnection = (req, res, next) => {
 };
 
 // Helper function to broadcast messages to all connected clients
-const broadcastToProject = (projectId, event, data) => {
+const broadcastToProject = (projectId, event, data, io = null) => {
   const connections = activeConnections.get(projectId);
-  if (!connections || connections.size === 0) {
-    console.log(`No active connections for project ${projectId}`);
-    return;
-  }
   
-  // For WebSocket connections
-  if (io) {
-    io.to(projectId).emit(event, data);
+  // For WebSocket connections - use provided io instance or global.io
+  const socketIo = io || global.io;
+  if (socketIo) {
+    try {
+      socketIo.to(projectId).emit(event, data);
+    } catch (error) {
+      console.error('Error broadcasting to WebSocket:', error);
+    }
+  } else {
+    console.warn('WebSocket io instance not available for broadcasting');
   }
   
   // For SSE connections
-  const sseMessage = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-  
-  for (const { res } of connections) {
-    try {
-      if (res && !res.writableEnded) {
-        res.write(sseMessage);
+  if (connections && connections.size > 0) {
+    const sseMessage = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    
+    for (const { res } of connections) {
+      try {
+        if (res && !res.writableEnded) {
+          res.write(sseMessage);
+        }
+      } catch (error) {
+        console.error('Error broadcasting message to SSE client:', error);
+        // Remove broken connection
+        const updatedConnections = new Set(connections);
+        updatedConnections.delete({ res });
+        activeConnections.set(projectId, updatedConnections);
       }
-    } catch (error) {
-      console.error('Error broadcasting message:', error);
-      // Remove broken connection
-      const updatedConnections = new Set(connections);
-      updatedConnections.delete({ res });
-      activeConnections.set(projectId, updatedConnections);
     }
+  } else {
+    console.log(`No active SSE connections for project ${projectId}`);
   }
 };
 
@@ -392,6 +399,53 @@ router.get("/sse/events/:projectId", authenticateConnection, async (req, res) =>
     }
     res.end();
   });
+});
+
+// Clear chat history for a project
+router.delete('/chat/:projectId', authenticateConnection, async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const userId = req.user.userId;
+
+    // Verify project exists and user has permission
+    const project = await Project.findById(projectId);
+    if (!project) {
+      return res.status(404).json({ message: 'Project not found' });
+    }
+
+    // Check if user is the owner or a collaborator with delete permissions
+    const isOwner = project.owner.toString() === userId;
+    const isCollaborator = project.collaborators.some(
+      collab => collab.user && collab.user.toString() === userId
+    );
+
+    if (!isOwner && !isCollaborator) {
+      return res.status(403).json({ message: 'Not authorized to clear chat history' });
+    }
+
+    // Delete all messages for this project
+    await Message.deleteMany({ project: projectId });
+
+    // Broadcast to all connected clients that chat was cleared
+    broadcastToProject(projectId, 'chat_cleared', { 
+      projectId,
+      clearedBy: userId,
+      timestamp: new Date()
+    });
+
+    res.json({ 
+      success: true, 
+      message: 'Chat history cleared successfully',
+      projectId
+    });
+  } catch (error) {
+    console.error('Error clearing chat history:', error);
+    res.status(500).json({ 
+      success: false, 
+      message: 'Failed to clear chat history',
+      error: error.message 
+    });
+  }
 });
 
 export default router;

@@ -103,14 +103,20 @@ router.post('/register', async (req, res, next) => {
     const user = new User({
       username: username.trim(),
       email: email.toLowerCase().trim(),
-      password: password.trim()
+      password: password.trim(),
+      name: username.trim() // Use username as the default name
     });
 
     await user.save();
 
-    // Generate JWT
+    // Generate JWT with user details
     const token = jwt.sign(
-      { userId: user._id },
+      { 
+        userId: user._id,
+        email: user.email,
+        name: user.name || user.username,
+        username: user.username
+      },
       process.env.JWT_SECRET || 'devdeck-secret-key',
       { expiresIn: '7d' }
     );
@@ -127,7 +133,8 @@ router.post('/register', async (req, res, next) => {
       user: {
         id: user._id,
         username: user.username,
-        email: user.email
+        email: user.email,
+        name: user.name || user.username
       }
     });
   } catch (error) {
@@ -175,14 +182,27 @@ router.post('/login', async (req, res, next) => {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
 
-    // Generate JWT
+    // Generate JWT with user details
     const token = jwt.sign(
-      { userId: user._id },
+      { 
+        userId: user._id,
+        email: user.email,
+        name: user.name || user.username, // Fallback to username if name is not set
+        username: user.username
+      },
       process.env.JWT_SECRET || 'devdeck-secret-key',
       { expiresIn: '7d' }
     );
 
-    res.json({ token, user: { id: user._id, username: user.username, email: user.email } });
+    res.json({ 
+      token, 
+      user: { 
+        id: user._id, 
+        username: user.username, 
+        email: user.email,
+        name: user.name || user.username
+      } 
+    });
   } catch (error) {
     next(error);
   }

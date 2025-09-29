@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useSocket } from '../../context/SocketContext';
 import { useAuth } from '../../context/AuthContext';
-import { ChatBubbleLeftRightIcon, PaperAirplaneIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import { ChatBubbleLeftRightIcon, PaperAirplaneIcon, XMarkIcon, TrashIcon } from '@heroicons/react/24/outline';
 import UserAvatar from '../common/UserAvatar';
 import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'react-hot-toast';
@@ -12,6 +12,7 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
   const [isLoading, setIsLoading] = useState(true);
   const { socket } = useSocket();
   const { user } = useAuth();
+  const [isClearing, setIsClearing] = useState(false);
   const messagesEndRef = useRef(null);
   // Ensure the API base URL ends with /api
   const baseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -69,27 +70,113 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
   }, [projectId, apiBase]);
 
   useEffect(() => {
-    if (isOpen) {
       fetchChatHistory();
-    }
-  }, [fetchChatHistory, isOpen]);
+    }, [fetchChatHistory, isOpen]);
 
-  // Handle incoming real-time messages and project joining
+  // Function to clear chat history
+  const clearChatHistory = async () => {
+    console.log('clearChatHistory called');
+    if (!projectId) {
+      console.error('No project ID available');
+      toast.error('No project ID available');
+      return;
+    }
+
+    if (!window.confirm('Are you sure you want to clear the chat history? This action cannot be undone.')) {
+      return;
+    }
+
+    const token = getAuthToken();
+    if (!token) {
+      console.error('No authentication token found');
+      toast.error('Authentication required. Please log in again.');
+      return;
+    }
+
+    console.log('Starting to clear chat history for project:', projectId);
+    setIsClearing(true);
+    
+    try {
+      // Use the correct endpoint format that matches the backend route
+      const url = `${apiBase}/sse/chat/${projectId}`;
+      console.log('Making DELETE request to:', url);
+      
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        credentials: 'include'
+      });
+
+      console.log('Response status:', response.status);
+      
+      // Try to parse the response body even if the status is not OK
+      let responseData;
+      try {
+        const text = await response.text();
+        console.log('Raw response:', text);
+        responseData = text ? JSON.parse(text) : {};
+      } catch (parseError) {
+        console.error('Error parsing response:', parseError);
+        throw new Error('Invalid response from server');
+      }
+
+      if (!response.ok) {
+        const errorMessage = responseData.message || 
+                           response.statusText || 
+                           `HTTP error! status: ${response.status}`;
+        console.error('Error response:', {
+          status: response.status,
+          statusText: response.statusText,
+          responseData
+        });
+        throw new Error(errorMessage);
+      }
+
+      console.log('Chat history cleared successfully');
+      // Don't update state here - wait for the chat_cleared event
+      toast.success('Chat history cleared');
+    } catch (error) {
+      console.error('Error in clearChatHistory:', {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+        cause: error.cause
+      });
+      
+      // Show error in UI and keep it visible for 5 seconds
+      toast.error(`Failed to clear chat history: ${error.message}`, {
+        duration: 5000
+      });
+    } finally {
+      console.log('Clearing complete, setting isClearing to false');
+      setIsClearing(false);
+    }
+  };
+
   useEffect(() => {
     if (!socket || !projectId) return;
-
-    // Ensure projectId is a valid string
+    
+    // Ensure projectId is a string
     const projectIdStr = String(projectId);
     
-    // Join the project room with user information
     const joinProject = () => {
-      console.log('Joining project room:', projectIdStr);
-      socket.emit('joinProject', { 
-        projectId: projectIdStr,
-        userId: user?.id,
-        username: user?.name || user?.email || 'Anonymous',
-        email: user?.email || ''
-      });
+      if (socket.connected) {
+        console.log('Joining project room:', projectIdStr);
+        socket.emit('joinProject', { projectId: projectIdStr, userId: user?.id });
+      }
+    };
+    
+    // Handle chat cleared event
+    const handleChatCleared = (data) => {
+      console.log('Chat cleared event received:', data);
+      if (data.projectId === projectIdStr) {
+        setMessages([]);
+        toast.success('Chat history cleared', { duration: 3000 });
+      }
     };
 
     const handleNewMessage = (incomingMessage) => {
@@ -156,14 +243,17 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
     // Set up socket event listeners
     socket.on('connect', joinProject);
     socket.on('chatMessage', handleNewMessage);
+    socket.on('chat_cleared', handleChatCleared);
     
     // Initial join
     joinProject();
     
     // Clean up event listeners
     return () => {
+      console.log('Cleaning up chat panel socket listeners');
       socket.off('connect', joinProject);
       socket.off('chatMessage', handleNewMessage);
+      socket.off('chat_cleared', handleChatCleared);
       
       // Leave the room when component unmounts
       if (socket.connected) {
@@ -243,14 +333,27 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
 
   return (
     <div className={`fixed bottom-4 right-4 w-80 bg-white rounded-lg shadow-xl flex flex-col ${isOpen ? 'h-96' : 'h-12'} transition-all duration-300 ease-in-out overflow-hidden z-50`}>
-      <div 
-        className="bg-blue-600 text-white p-3 flex justify-between items-center cursor-pointer"
-        onClick={() => isOpen ? onClose() : (onClose && onClose())}
-      >
-        <div className="flex items-center">
+      <div className="bg-blue-600 text-white p-3 flex justify-between items-center">
+        <div 
+          className="flex items-center cursor-pointer flex-1"
+          onClick={() => isOpen ? onClose() : (onClose && onClose())}
+        >
           <ChatBubbleLeftRightIcon className="h-5 w-5 mr-2" />
           <span>Project Chat</span>
         </div>
+        {isOpen && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              clearChatHistory();
+            }}
+            disabled={isClearing || messages.length === 0}
+            className="p-1 rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            title="Clear chat history"
+          >
+            <TrashIcon className="h-4 w-4" />
+          </button>
+        )}
         {isOpen ? (
           <XMarkIcon 
             className="h-5 w-5 hover:bg-blue-700 rounded p-0.5" 

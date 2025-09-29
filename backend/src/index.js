@@ -85,6 +85,9 @@ app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
 
+// Make io available in the app
+// app.set('io', io);
+
 // API Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/projects", projectRoutes);
@@ -92,8 +95,11 @@ app.use("/api", sseRoutes);
 app.use("/api", apiRoutes);
 app.use("/api/users", usersRoutes);
 
+// Make io globally available
+let io;
+
 // WebSocket setup
-const io = new Server(server, {
+io = new Server(server, {
   cors: {
     origin: [
       "http://localhost:5173",
@@ -509,13 +515,13 @@ const startServer = async () => {
     } catch (idxErr) {
       console.error("Failed to sync Project indexes:", idxErr);
     }
-
     const PORT = process.env.PORT || 3000;
-    server.listen(PORT, "0.0.0.0", () => {
+    server.listen(PORT, () => {
       console.log(`Server running on port ${PORT}`);
+      console.log(` API Documentation available at http://localhost:${PORT}/api-docs`);
     });
   } catch (error) {
-    console.error("Failed to start server:", error);
+    console.error('Failed to start server:', error);
     process.exit(1);
   }
 };

@@ -114,29 +114,32 @@ const CollaboratorsBar = ({ projectId }) => {
 
   useEffect(() => {
     if (!projectId) {
-      console.log('No projectId provided');
-      return;
+      console.log('No projectId provided, skipping collaborator setup');
+      return () => {}; // Return empty cleanup function
     }
     
     if (!socket) {
-      console.error('Socket not available');
-      setHasError(false); // Don't show error, just show empty state
+      console.error('Socket not available, cannot load collaborators');
+      setHasError(false);
       setIsLoading(false);
-      return;
+      return () => {}; // Return empty cleanup function
     }
     
     console.log('Setting up collaborator listener for project:', projectId);
     setIsLoading(true);
     setHasError(false);
     
+    // Increase timeout to 30 seconds to accommodate slower connections
+    const LOADING_TIMEOUT = 30000;
     const loadingTimeout = setTimeout(() => {
       if (isLoading) {
-        console.warn('Collaborator load timeout');
+        console.warn('Collaborator load timeout after', LOADING_TIMEOUT / 1000, 'seconds');
         setIsLoading(false);
-        setCollabs([]); // Set empty array on timeout
-        setHasError(false); // Don't show error
+        setCollabs([]);
+        setHasError(true); // Show error state on timeout
+        toast.error('Loading collaborators timed out. Please check your connection.');
       }
-    }, 10000);
+    }, LOADING_TIMEOUT);
 
     const onCollaboratorUpdate = (list) => {
       console.log('Received collaborator update:', list);
@@ -150,8 +153,12 @@ const CollaboratorsBar = ({ projectId }) => {
       console.error('Error loading collaborators:', error);
       clearTimeout(loadingTimeout);
       setIsLoading(false);
-      setCollabs([]); // Set empty array on error
-      setHasError(false); // Don't show error
+      setCollabs([]);
+      setHasError(true);
+      
+      // Show a more specific error message if available
+      const errorMessage = error?.message || 'Failed to load collaborators';
+      toast.error(errorMessage, { duration: 5000 });
     };
 
     const requestCollaborators = () => {
@@ -160,9 +167,17 @@ const CollaboratorsBar = ({ projectId }) => {
         return;
       }
       
+      console.log('Requesting collaborators for project:', projectId);
+      
       if (socket?.connected) {
-        console.log('Requesting collaborators for project:', projectId);
-        socket.emit('get-collaborators', projectId);
+        socket.emit('get-collaborators', projectId, (ack) => {
+          if (ack?.error) {
+            console.error('Error from get-collaborators ack:', ack.error);
+            onError(new Error(ack.error));
+          } else {
+            console.log('get-collaborators ack received:', ack);
+          }
+        });
       } else {
         console.log('Socket not connected, waiting for connection...');
         const onConnect = () => {
@@ -170,33 +185,59 @@ const CollaboratorsBar = ({ projectId }) => {
             console.log('Socket connected, requesting collaborators for project:', projectId);
             socket.emit('get-collaborators', projectId);
           }
-          socket.off('connect', onConnect);
         };
-        socket.on('connect', onConnect);
+        
+        // Add a one-time connect listener
+        const connectHandler = () => {
+          onConnect();
+          socket.off('connect', connectHandler);
+        };
+        
+        socket.on('connect', connectHandler);
       }
     };
 
+    // Set up event listeners
     socket.on('collaborator-update', onCollaboratorUpdate);
     socket.on('collaborator-error', onError);
 
-    socket.on('connect', () => {
+    // Handle initial connection
+    const handleConnect = () => {
       console.log('Socket connected, requesting collaborators');
       requestCollaborators();
-    });
+    };
 
-    socket.on('disconnect', () => {
-      console.log('Socket disconnected');
-      setHasError(false); // Don't show error on disconnect
-    });
+    if (socket.connected) {
+      handleConnect();
+    } else {
+      socket.on('connect', handleConnect);
+    }
 
+    // Set up disconnect handler
+    const handleDisconnect = (reason) => {
+      console.log('Socket disconnected:', reason);
+      setHasError(true);
+      toast.error('Disconnected from server. Reconnecting...', { duration: 3000 });
+    };
+    
+    socket.on('disconnect', handleDisconnect);
+
+    // Initial request
     requestCollaborators();
 
+    // Cleanup function
     return () => {
+      console.log('Cleaning up collaborator listeners for project:', projectId);
       clearTimeout(loadingTimeout);
+      
+      // Remove all listeners to prevent memory leaks
       socket.off('collaborator-update', onCollaboratorUpdate);
       socket.off('collaborator-error', onError);
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
+      
+      // Clean up any pending connect handlers
       socket.off('connect');
-      socket.off('disconnect');
     };
   }, [projectId, socket]);
 

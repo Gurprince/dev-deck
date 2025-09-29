@@ -1,16 +1,21 @@
-# Node
+# Node modules
 node_modules/
-.env
-frontend/.env
-backend/.env
-
-# Logs
+.vite/
 *.log
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode/
+.idea/
 
 # Build
 dist/
 build/
 
-text.txt
-
-.vscode/
+# Temp files
+backend/temp/
+text.txt 

@@ -9,7 +9,7 @@ import { toast } from 'react-hot-toast';
 
 const ChatPanel = ({ projectId, isOpen, onClose }) => {
   const [newMessage, setNewMessage] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const [_isLoading, setIsLoading] = useState(true);
   const { socket, sendChatMessage } = useSocket();
   const { user } = useAuth();
   const [isClearing, setIsClearing] = useState(false);

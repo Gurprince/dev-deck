@@ -7,7 +7,6 @@ const InlineComment = ({
   onResolve, 
   onReply, 
   onDelete, 
-  currentUser,
   position
 }) => {
   const [replyText, setReplyText] = useState('');

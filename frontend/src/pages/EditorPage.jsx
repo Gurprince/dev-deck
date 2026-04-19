@@ -1,23 +1,24 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectsApi } from '../services/api';
-import { useAuth } from '../context/AuthContext';
 import { useSocket } from '../context/SocketContext';
+import { useTheme } from '../context/ThemeContext';
 import CodePlayground from '../components/editor/CodePlayground';
-import { defaultExpressCode } from '../constants/boilerplate';
+import EditorWorkspaceShell from '../components/workspace/EditorWorkspaceShell';
+import { getProjectTemplate } from '../constants/boilerplate';
 import { toast } from 'react-hot-toast';
-import { LogLevels } from '../components/editor/OutputPanel';
 
 const EditorPage = () => {
   const { projectId } = useParams();
   const navigate = useNavigate();
-  const { user } = useAuth();
-  const { joinProject, leaveProject, onCodeUpdate, onExecutionLog } = useSocket();
+  const [searchParams] = useSearchParams();
+  const selectedTemplate = getProjectTemplate(searchParams.get('template'));
+  const starterCode = selectedTemplate.code;
+  const [chatOpen, setChatOpen] = useState(false);
+  const { joinProject, leaveProject, onCodeUpdate } = useSocket();
+  const { theme } = useTheme();
   const queryClient = useQueryClient();
-  const [logs, setLogs] = useState([]);
-  const [isSaving, setIsSaving] = useState(false);
-  const [isExecuting, setIsExecuting] = useState(false);
   const [title, setTitle] = useState('Untitled Project');
 
   // Fetch project data
@@ -37,10 +38,10 @@ const EditorPage = () => {
   useEffect(() => {
     if (project?.name) {
       setTitle(project.name);
-    } else if (projectId === 'new') {
-      setTitle('Untitled Project');
+    } else if (!projectId || projectId === 'new') {
+      setTitle(selectedTemplate?.name || 'Untitled Project');
     }
-  }, [project, projectId]);
+  }, [project, projectId, selectedTemplate?.name]);
 
   // Update mutation for saving project
   const updateProjectMutation = useMutation({
@@ -85,31 +86,17 @@ const EditorPage = () => {
       }
     });
     
-    // Handle execution logs
-    const cleanupLogs = onExecutionLog((log) => {
-      setLogs((prevLogs) => [
-        ...prevLogs,
-        {
-          message: log,
-          level: LogLevels.INFO,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    });
-    
     // Cleanup on unmount
     return () => {
       cleanupCodeUpdate();
-      cleanupLogs();
       if (projectId && projectId !== 'new') {
         leaveProject(projectId);
       }
     };
-  }, [projectId, project?.code, joinProject, leaveProject, onCodeUpdate, onExecutionLog, queryClient]);
+  }, [projectId, project?.code, joinProject, leaveProject, onCodeUpdate, queryClient]);
 
   // Handle saving the project
   const handleSave = async (code) => {
-    setIsSaving(true);
     try {
       if (!projectId) {
         // Create new project
@@ -130,49 +117,6 @@ const EditorPage = () => {
     } catch (error) {
       console.error('Error saving project:', error);
       return false;
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  // Handle code execution
-  const handleRunCode = async (code) => {
-    if (!projectId || projectId === 'new') return;
-    
-    setIsExecuting(true);
-    try {
-      // Save the code first
-      const saved = await handleSave(code);
-      if (!saved) {
-        toast.error('Failed to save code before execution');
-        return;
-      }
-      
-      // Execute the code
-      setLogs((prevLogs) => [
-        ...prevLogs,
-        {
-          message: '\n--- Starting execution ---\n',
-          level: LogLevels.INFO,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-      
-      // The actual execution will be handled by the CodePlayground component
-      // which will use the executionApi to run the code
-      
-    } catch (error) {
-      console.error('Error executing code:', error);
-      setLogs((prevLogs) => [
-        ...prevLogs,
-        {
-          message: `Error: ${error.message}\n`,
-          level: LogLevels.ERROR,
-          timestamp: new Date().toISOString(),
-        },
-      ]);
-    } finally {
-      setIsExecuting(false);
     }
   };
 
@@ -195,16 +139,16 @@ const EditorPage = () => {
 
   if (isLoading && projectId !== 'new') {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
+      <div className="flex h-full min-h-[50vh] flex-1 items-center justify-center bg-[#1e1e1e]">
+        <div className="h-10 w-10 animate-spin rounded-full border-2 border-[#2b2b30] border-t-[#0e639c]" />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="max-w-4xl mx-auto p-6">
-        <div className="bg-red-50 border-l-4 border-red-400 p-4">
+      <div className="mx-auto max-w-4xl flex-1 p-6 text-[#e4e4e7]">
+        <div className="border-l-4 border-red-500 bg-red-950/40 p-4">
           <div className="flex">
             <div className="flex-shrink-0">
               <svg className="h-5 w-5 text-red-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
@@ -212,7 +156,7 @@ const EditorPage = () => {
               </svg>
             </div>
             <div className="ml-3">
-              <p className="text-sm text-red-700">
+              <p className="text-sm text-red-200">
                 {error.message || 'Failed to load project. Please try again.'}
               </p>
             </div>
@@ -223,86 +167,33 @@ const EditorPage = () => {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Header */}
-      <header className="bg-white dark:bg-gray-800 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex justify-between items-center">
-            <div className="flex-1 min-w-0">
-              <input
-                className="w-full max-w-xl bg-transparent text-2xl font-bold text-gray-900 dark:text-white border-b border-transparent focus:border-indigo-500 focus:outline-none"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="Project title"
-              />
-              {project && (
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Last updated: {new Date(project.updatedAt).toLocaleString()}
-                </p>
-              )}
-            </div>
-            <div className="flex space-x-3">
-              <button
-                onClick={() => navigate('/projects')}
-                className="inline-flex items-center px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm text-sm font-medium text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-              >
-                Back to Projects
-              </button>
-              {projectId !== 'new' && (
-                <button
-                  onClick={handleDeleteProject}
-                  className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-red-600 hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
-                >
-                  Delete Project
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="flex-1 overflow-hidden">
+    <div className="flex h-full min-h-0 flex-1 flex-col bg-slate-50 dark:bg-[#1e1e1e]">
+      <EditorWorkspaceShell
+        title={title}
+        onTitleChange={setTitle}
+        subtitle={
+          project
+            ? `Updated ${new Date(project.updatedAt).toLocaleString()}`
+            : projectId === 'new'
+              ? 'New project'
+              : undefined
+        }
+        projectId={projectId}
+        onBackToProjects={() => navigate('/projects')}
+        onDeleteProject={projectId && projectId !== 'new' ? handleDeleteProject : undefined}
+          chatOpen={chatOpen}
+          onToggleChat={() => setChatOpen((c) => !c)}
+          surface={theme === 'dark' ? 'ide' : 'default'}
+      >
         <CodePlayground
-          initialCode={!projectId ? defaultExpressCode : (project?.code || '')}
+          initialCode={!projectId ? starterCode : (project?.code || '')}
           projectId={projectId || undefined}
           onSave={handleSave}
+          chatOpen={chatOpen}
+          onChatOpenChange={setChatOpen}
+          surface={theme === 'dark' ? 'ide' : 'default'}
         />
-      </main>
-
-      {/* Footer */}
-      <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-          <div className="flex justify-between items-center text-sm text-gray-500 dark:text-gray-400">
-            <div>
-              {user ? (
-                <span>Logged in as <span className="font-medium">{user.username}</span></span>
-              ) : (
-                <span>Not logged in</span>
-              )}
-            </div>
-            <div className="flex items-center space-x-4">
-              <span>DevDeck v{import.meta.env.VITE_APP_VERSION || '1.0.0'}</span>
-              <a 
-                href="https://github.com/yourusername/devdeck" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
-              >
-                GitHub
-              </a>
-              <a 
-                href="https://github.com/yourusername/devdeck/issues" 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300"
-              >
-                Report an Issue
-              </a>
-            </div>
-          </div>
-        </div>
-      </footer>
+      </EditorWorkspaceShell>
     </div>
   );
 };

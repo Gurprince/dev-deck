@@ -59,7 +59,7 @@ const InvitationsDropdown = () => {
         currentInvitations: invitations
       });
       
-      const response = await invitationsApi.respondToInvitation(projectId, invitationId, action);
+      await invitationsApi.respondToInvitation(projectId, invitationId, action);
       
       if (action === 'accept') {
         // Refresh the projects list to show the newly accepted project
@@ -91,22 +91,25 @@ const InvitationsDropdown = () => {
     <div className="relative">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 text-gray-400 hover:text-gray-500 focus:outline-none"
+        className="relative rounded-md border border-slate-200 bg-slate-50 p-2 text-slate-500 hover:border-sky-500/40 hover:text-sky-600 focus:outline-none focus:ring-2 focus:ring-sky-500 dark:border-[#2b2b30] dark:bg-[#111113] dark:text-[#a1a1aa] dark:hover:text-sky-300"
       >
-        <BellIcon className="h-6 w-6" aria-hidden="true" />
+        <BellIcon className="h-5 w-5" aria-hidden="true" />
         {hasInvitations && (
-          <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500"></span>
+          <span className="absolute right-1 top-1 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-slate-50 dark:ring-[#111113]"></span>
         )}
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 mt-2 w-80 origin-top-right rounded-md bg-white shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none z-50">
+        <div className="absolute right-0 z-50 mt-2 w-80 origin-top-right rounded-md border border-slate-200 bg-white shadow-xl focus:outline-none dark:border-[#2b2b30] dark:bg-[#18181b]">
           <div className="p-4">
-            <div className="flex items-center justify-between border-b pb-2">
-              <h3 className="text-lg font-medium text-gray-900">Invitations</h3>
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2 dark:border-[#2b2b30]">
+              <div>
+                <h3 className="text-base font-semibold text-slate-950 dark:text-white">Invitations</h3>
+                <p className="text-xs text-slate-500 dark:text-[#858585]">Project collaboration requests</p>
+              </div>
               <button
                 onClick={() => setIsOpen(false)}
-                className="text-gray-400 hover:text-gray-500"
+                className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-950 dark:text-[#858585] dark:hover:bg-[#2d2d30] dark:hover:text-white"
               >
                 <XMarkIcon className="h-5 w-5" />
               </button>
@@ -114,31 +117,31 @@ const InvitationsDropdown = () => {
             
             <div className="mt-2 max-h-96 overflow-y-auto">
               {isLoading ? (
-                <div className="py-4 text-center text-gray-500">Loading...</div>
+                <div className="py-4 text-center text-slate-500 dark:text-[#858585]">Loading...</div>
               ) : hasInvitations ? (
-                <ul className="divide-y divide-gray-200">
+                <ul className="divide-y divide-slate-200 dark:divide-[#2b2b30]">
                   {invitations.map((invitation) => (
                     <li key={invitation._id} className="py-3">
                       <div className="flex items-center justify-between">
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-gray-900 truncate">
+                          <p className="text-sm font-medium text-slate-950 dark:text-[#f4f4f5] truncate">
                             {invitation.project.name}
                           </p>
-                          <p className="text-sm text-gray-500 truncate">
+                          <p className="text-sm text-slate-500 dark:text-[#858585] truncate">
                             Invited as {invitation.role}
                           </p>
                         </div>
                         <div className="ml-4 flex-shrink-0 flex space-x-2">
                           <button
                             onClick={() => handleRespond(invitation.project._id, invitation._id, 'accept')}
-                            className="p-1 rounded-full text-green-600 hover:bg-green-50"
+                            className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-1 text-emerald-300 hover:bg-emerald-500/20"
                             title="Accept"
                           >
                             <CheckIcon className="h-5 w-5" />
                           </button>
                           <button
                             onClick={() => handleRespond(invitation.project._id, invitation._id, 'decline')}
-                            className="p-1 rounded-full text-red-600 hover:bg-red-50"
+                            className="rounded-md border border-red-500/30 bg-red-500/10 p-1 text-red-300 hover:bg-red-500/20"
                             title="Decline"
                           >
                             <XMarkIcon className="h-5 w-5" />
@@ -149,7 +152,7 @@ const InvitationsDropdown = () => {
                   ))}
                 </ul>
               ) : (
-                <div className="py-4 text-center text-gray-500">
+                <div className="py-4 text-center text-slate-500 dark:text-[#858585]">
                   No pending invitations
                 </div>
               )}

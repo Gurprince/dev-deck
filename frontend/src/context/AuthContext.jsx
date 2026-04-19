@@ -41,14 +41,14 @@ export const AuthProvider = ({ children }) => {
     },
     onSuccess: (data) => {
       setUser(data);
-      try { localStorage.setItem("user", JSON.stringify(data)); } catch {}
+      try { localStorage.setItem("user", JSON.stringify(data)); } catch { /* ignore quota */ }
       setIsAuthenticated(true);
       // Only navigate if we're not already on a protected route
       if (window.location.pathname === '/login' || window.location.pathname === '/register') {
         navigate("/projects");
       }
     },
-    onError: (error) => {
+    onError: () => {
       setUser(null);
       // Keep optimistic auth until explicit logout or subsequent guarded action
       // Do not navigate here; route guards will handle if needed
@@ -69,7 +69,7 @@ export const AuthProvider = ({ children }) => {
       const { data } = await api.post("/auth/login", { email, password });
       localStorage.setItem("token", data.token);
       setUser(data.user);
-      try { localStorage.setItem("user", JSON.stringify(data.user)); } catch {}
+      try { localStorage.setItem("user", JSON.stringify(data.user)); } catch { /* ignore quota */ }
       setIsAuthenticated(true);
       toast.success("Logged in successfully");
       navigate("/projects");
@@ -96,7 +96,7 @@ export const AuthProvider = ({ children }) => {
         const { token, user } = data;
         localStorage.setItem("token", token);
         setUser(user || { username, email });
-        try { localStorage.setItem("user", JSON.stringify(user || { username, email })); } catch {}
+        try { localStorage.setItem("user", JSON.stringify(user || { username, email })); } catch { /* ignore quota */ }
         setIsAuthenticated(true);
         toast.success(data.message || "Account created successfully");
         navigate("/projects");
@@ -159,7 +159,7 @@ export const AuthProvider = ({ children }) => {
       const userId = user?.id || user?._id;
       const { data } = await api.put(`/users/${userId}`, updates);
       setUser(data);
-      try { localStorage.setItem("user", JSON.stringify(data)); } catch {}
+      try { localStorage.setItem("user", JSON.stringify(data)); } catch { /* ignore quota */ }
       toast.success("Profile updated successfully");
       return true;
     } catch (error) {

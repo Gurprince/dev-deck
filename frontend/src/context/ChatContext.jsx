@@ -1,10 +1,8 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import { useAuth } from './AuthContext';
+import { createContext, useContext, useState } from 'react';
 
 const ChatContext = createContext();
 
 export const ChatProvider = ({ children }) => {
-  const { user } = useAuth();
   const [chatMessages, setChatMessages] = useState({});
 
   // Load messages for a specific project

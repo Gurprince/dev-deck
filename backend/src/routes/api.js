@@ -1,6 +1,5 @@
 import express from 'express';
 import { exec } from 'child_process';
-import { promisify } from 'util';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -8,11 +7,13 @@ import { fileURLToPath } from 'url';
 import Project from '../models/Project.js';
 import { authenticateToken } from '../middleware/auth.js';
 import { parseCodeForEndpoints, generateOpenAPISpec } from '../services/parserService.js';
-import { executeCode } from '../services/executionService.js';
-// (deduped)
+import { killProcess, runningServers } from '../services/executionService.js';
+import {
+  ensureExecutionTemplate,
+  linkOrCopyDependencies,
+} from '../services/executionEnvCache.js';
 
 const router = express.Router();
-const execPromise = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -70,6 +71,15 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
     return res.status(400).json({ message: 'Code is required' });
   }
 
+  try {
+    await ensureExecutionTemplate();
+  } catch (prepErr) {
+    console.error('Execution template preparation failed:', prepErr);
+    return res.status(500).json({
+      message: prepErr.message || 'Failed to prepare execution environment',
+    });
+  }
+
   // Create a secure per-run temp directory (avoids permission issues on Windows)
   const tempPrefix = path.join(os.tmpdir(), 'dev-deck-');
   let tempDirPath = '';
@@ -82,37 +92,15 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
   const tempFilePath = path.join(tempDirPath, 'index.js');
   
   try {
-    // Create package.json with required dependencies
-    const packageJson = {
-      name: `execution-${path.basename(tempDirPath)}`,
-      version: '1.0.0',
-      private: true,
-      main: 'index.js',
-      dependencies: {
-        express: '^4.18.2',
-        cors: '^2.8.5',
-        'body-parser': '^1.20.2',
-        'express-validator': '^7.0.1'
-      }
-    };
+    const runStarted = Date.now();
 
-    // Write package.json and install dependencies
-    fs.writeFileSync(path.join(tempDirPath, 'package.json'), JSON.stringify(packageJson, null, 2));
-    
-    // Write the user's code to index.js
+    linkOrCopyDependencies(tempDirPath);
     fs.writeFileSync(tempFilePath, code);
 
-    // Install dependencies
-    await execPromise('npm install', { cwd: tempDirPath });
-
-    // Determine port: reuse project.runPort if set, else 0 to pick free port and persist it
-    let desiredPort = 0;
-    if (projectId) {
-      const proj = await Project.findById(projectId);
-      if (proj?.runPort) desiredPort = proj.runPort;
-      // Inform client of intended base URL for convenience
-      if (socketIO) socketIO.to(projectId).emit('executionLog', `Base URL: http://127.0.0.1:${desiredPort || '(allocating...)'}\n`);
-    }
+    // Always bind via ephemeral port (0). Reusing project.runPort caused EADDRINUSE when the
+    // previous run was still listening or another process held that port. User code should use
+    // process.env.PORT (see boilerplate); we still persist the discovered port after a successful run.
+    const bindPort = 0;
 
     // Execute the code with a timeout (kill process on timeout)
     let stdout = '';
@@ -121,7 +109,7 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
     await new Promise((resolve, reject) => {
       const child = exec('node index.js', {
         cwd: tempDirPath,
-        env: { ...process.env, PORT: desiredPort },
+        env: { ...process.env, PORT: String(bindPort) },
       });
 
       if (child.stdout) child.stdout.on('data', (d) => {
@@ -144,7 +132,7 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
         clearTimeout(timer);
         // If a dynamic port was selected, parse it from stdout and persist to project.runPort
         try {
-          if (projectId && desiredPort === 0) {
+          if (projectId) {
             const match = stdout.match(/http:\/\/127\.0\.0\.1:(\d+)/) || stdout.match(/port\s+(\d+)/i);
             const port = match ? Number(match[1]) : null;
             if (port) {
@@ -160,14 +148,18 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
       });
     });
 
-    // If port in use, retry once on a random free port and persist it
-    if (/EADDRINUSE/i.test(stderr)) {
+    // If port in use (e.g. user hardcoded a port), retry once with ephemeral port only
+    const portBusy =
+      /EADDRINUSE/i.test(stderr) ||
+      /EADDRINUSE/i.test(stdout);
+    if (portBusy) {
+      stdout += '\n[DevDeck] Port conflict — retrying with PORT=0 (use process.env.PORT in your code).\n';
       let retryStdout = '';
       let retryStderr = '';
       await new Promise((resolve) => {
         const child = exec('node index.js', {
           cwd: tempDirPath,
-          env: { ...process.env, PORT: 0 },
+          env: { ...process.env, PORT: '0' },
         });
         if (child.stdout) child.stdout.on('data', (d) => {
           retryStdout += d;
@@ -216,7 +208,8 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
       success: true,
       output: stdout || stderr,
       stderr: stderr || '',
-      timedOut
+      timedOut,
+      durationMs: Date.now() - runStarted,
     });
   } catch (error) {
     // Clean up temp directory if it exists
@@ -301,37 +294,6 @@ router.post('/:projectId/endpoints', authenticateToken, async (req, res, next) =
   }
 });
 
-router.post('/execute', authenticateToken, async (req, res, next) => {
-  try {
-    const { code } = req.body;
-    if (!code) {
-      return res.status(400).json({ message: 'Code is required' });
-    }
-
-    const result = await executeCode(code);
-    res.json(result);
-  } catch (error) {
-    console.error('Execution error:', error);
-    if (error.message.includes('timeout')) {
-      return res.status(408).json({ 
-        message: 'Execution timed out. The code took too long to execute.' 
-      });
-    }
-    if (error.message.includes('memory')) {
-      return res.status(400).json({ 
-        message: 'Execution exceeded memory limits.' 
-      });
-    }
-    if (error.message === 'Rate limit exceeded. Please try again later.') {
-      return res.status(429).json({ 
-        message: error.message 
-      });
-    }
-    next(error);
-  }
-});
-
-// Add this to your api.js routes
 router.post('/stop-execution', authenticateToken, (req, res) => {
   const { executionId } = req.body;
   if (!executionId) {

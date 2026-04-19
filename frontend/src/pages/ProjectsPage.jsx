@@ -1,19 +1,76 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectsApi } from '../services/api';
-import { useAuth } from '../context/AuthContext';
 import { toast } from 'react-hot-toast';
-import { MagnifyingGlassIcon as SearchIcon, PlusIcon, TrashIcon, PencilIcon, EyeIcon } from '@heroicons/react/24/outline';
+import {
+  BellAlertIcon,
+  CalendarDaysIcon,
+  ClipboardDocumentListIcon,
+  CodeBracketSquareIcon,
+  DocumentTextIcon,
+  FolderOpenIcon,
+  GlobeAltIcon,
+  LockClosedIcon,
+  MagnifyingGlassIcon as SearchIcon,
+  PlusIcon,
+  PuzzlePieceIcon,
+  ShieldCheckIcon,
+  TrashIcon,
+  PencilIcon,
+  EyeIcon,
+  FunnelIcon,
+  StarIcon,
+} from '@heroicons/react/24/outline';
+import { projectTemplates } from '../constants/boilerplate';
+
+const devDeckPriorities = [
+  {
+    stage: 'P0 - Core workflow',
+    summary: 'Keep planning, coding, testing, snippets, and docs in one project workspace.',
+    items: [
+      { label: 'Task board', status: 'Implemented in editor', icon: ClipboardDocumentListIcon },
+      { label: 'Snippet vault', status: 'Implemented in editor', icon: CodeBracketSquareIcon },
+      { label: 'Generated API docs', status: 'Available after route scan', icon: DocumentTextIcon },
+    ],
+  },
+  {
+    stage: 'P1 - Collaboration',
+    summary: 'Make team work visible and controlled through roles, invites, comments, and presence.',
+    items: [
+      { label: 'Project collaborators', status: 'Invite flow available', icon: ShieldCheckIcon },
+      { label: 'Team chat', status: 'Available in editor', icon: BellAlertIcon },
+      { label: 'Role-based access', status: 'Needs backend enforcement pass', icon: ShieldCheckIcon },
+    ],
+  },
+  {
+    stage: 'P2 - Automation',
+    summary: 'Reduce tool switching with notifications, external integrations, and project automation.',
+    items: [
+      { label: 'Notifications', status: 'Invitations available', icon: BellAlertIcon },
+      { label: 'External integrations', status: 'Next milestone', icon: PuzzlePieceIcon },
+      { label: 'Custom dashboard widgets', status: 'Next milestone', icon: ClipboardDocumentListIcon },
+    ],
+  },
+];
 
 const ProjectsPage = () => {
-  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [searchQuery, setSearchQuery] = useState('');
   const [showDeleteModal, setShowDeleteModal] = useState(null);
+  const [visibilityFilter, setVisibilityFilter] = useState('all');
+  const [activityFilter, setActivityFilter] = useState('all');
+  const [sortBy, setSortBy] = useState('updated');
+  const [pinnedProjectIds, setPinnedProjectIds] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem('devdeck:pinned-projects') || '[]');
+    } catch {
+      return [];
+    }
+  });
 
   // Fetch projects
-  const { data: projects = [], isLoading, isError, error } = useQuery({
+  const { data: projects = [], isLoading } = useQuery({
     queryKey: ['projects'],
     queryFn: async () => {
       try {
@@ -43,15 +100,88 @@ const ProjectsPage = () => {
     },
   });
 
-  // Filter projects based on search query
-  const filteredProjects = projects.filter((project) =>
-    project.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    project.description?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  useEffect(() => {
+    localStorage.setItem('devdeck:pinned-projects', JSON.stringify(pinnedProjectIds));
+  }, [pinnedProjectIds]);
+
+  const getProjectWorkflowStats = (project) => {
+    const tasks = Array.isArray(project.tasks) ? project.tasks : [];
+    const snippets = Array.isArray(project.snippets) ? project.snippets : [];
+    const endpoints = Array.isArray(project.endpoints) ? project.endpoints : [];
+    const doneTasks = tasks.filter((task) => task.status === 'done').length;
+
+    return {
+      openTasks: tasks.filter((task) => task.status !== 'done').length,
+      doneTasks,
+      totalTasks: tasks.length,
+      snippets: snippets.length,
+      endpoints: endpoints.length,
+      progress: tasks.length ? Math.round((doneTasks / tasks.length) * 100) : 0,
+    };
+  };
+
+  const filteredProjects = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+
+    return projects
+      .filter((project) => {
+        const matchesQuery =
+          !query ||
+          project.name.toLowerCase().includes(query) ||
+          project.description?.toLowerCase().includes(query);
+        const matchesVisibility =
+          visibilityFilter === 'all' ||
+          (visibilityFilter === 'public' && project.isPublic) ||
+          (visibilityFilter === 'private' && !project.isPublic);
+        const stats = getProjectWorkflowStats(project);
+        const matchesActivity =
+          activityFilter === 'all' ||
+          (activityFilter === 'openTasks' && stats.openTasks > 0) ||
+          (activityFilter === 'snippets' && stats.snippets > 0) ||
+          (activityFilter === 'recent' &&
+            project.updatedAt &&
+            Date.now() - new Date(project.updatedAt).getTime() < 7 * 24 * 60 * 60 * 1000);
+
+        return matchesQuery && matchesVisibility && matchesActivity;
+      })
+      .sort((a, b) => {
+        const aPinned = pinnedProjectIds.includes(a._id) ? 1 : 0;
+        const bPinned = pinnedProjectIds.includes(b._id) ? 1 : 0;
+        if (aPinned !== bPinned) return bPinned - aPinned;
+
+        if (sortBy === 'name') return a.name.localeCompare(b.name);
+        if (sortBy === 'created') return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+        if (sortBy === 'tasks') return getProjectWorkflowStats(b).openTasks - getProjectWorkflowStats(a).openTasks;
+        return new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0);
+      });
+  }, [activityFilter, pinnedProjectIds, projects, searchQuery, sortBy, visibilityFilter]);
+  const publicProjects = projects.filter((project) => project.isPublic).length;
+  const privateProjects = projects.length - publicProjects;
+  const recentlyUpdated = projects.filter((project) => {
+    if (!project.updatedAt) return false;
+    const updatedAt = new Date(project.updatedAt).getTime();
+    return Date.now() - updatedAt < 7 * 24 * 60 * 60 * 1000;
+  }).length;
+  const dashboardStats = [
+    { label: 'Total projects', value: projects.length, icon: FolderOpenIcon },
+    { label: 'Updated this week', value: recentlyUpdated, icon: CalendarDaysIcon },
+    { label: 'Private', value: privateProjects, icon: LockClosedIcon },
+    { label: 'Public', value: publicProjects, icon: GlobeAltIcon },
+  ];
+  const pinnedProjects = projects.filter((project) => pinnedProjectIds.includes(project._id));
+  const templateList = Object.values(projectTemplates);
 
   // Handle project deletion
   const handleDeleteProject = (projectId) => {
     deleteProjectMutation.mutate(projectId);
+  };
+
+  const togglePinnedProject = (projectId) => {
+    setPinnedProjectIds((current) =>
+      current.includes(projectId)
+        ? current.filter((id) => id !== projectId)
+        : [projectId, ...current].slice(0, 8)
+    );
   };
 
   if (isLoading) {
@@ -63,53 +193,210 @@ const ProjectsPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
+    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-[#111113] dark:text-slate-100">
       {/* Header */}
-      <div className="bg-white dark:bg-gray-800 shadow-sm">
+      <div className="border-b border-slate-200 bg-white dark:border-[#2b2b30] dark:bg-[#18181b]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="md:flex md:items-center md:justify-between">
+          <div className="md:flex md:items-start md:justify-between">
             <div className="flex-1 min-w-0">
-              <h2 className="text-2xl font-bold leading-7 text-gray-900 dark:text-white sm:text-3xl sm:truncate">
-                My Projects
+              <p className="text-sm font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">Dev Deck Workspace</p>
+              <h2 className="mt-1 text-3xl font-bold leading-8 text-slate-950 dark:text-white sm:text-4xl sm:truncate">
+                Projects
               </h2>
-              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
-                Create and manage your DevDeck projects
+              <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-slate-400">
+                Plan, code, test, document, and collaborate from one focused developer workspace.
               </p>
             </div>
-            <div className="mt-4 flex md:mt-0 md:ml-4
-             ">
+            <div className="mt-4 flex md:mt-0 md:ml-4">
               <Link
                 to="/projects/new"
-                className="ml-3 inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                className="inline-flex items-center rounded-md border border-transparent bg-sky-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2"
               >
                 <PlusIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
                 New Project
               </Link>
             </div>
           </div>
+
+          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {dashboardStats.map((stat) => {
+              const Icon = stat.icon;
+
+              return (
+                <div
+                  key={stat.label}
+                  className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-[#2b2b30] dark:bg-[#1f1f23]"
+                >
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm text-slate-500 dark:text-slate-400">{stat.label}</p>
+                    <Icon className="h-5 w-5 text-sky-500" />
+                  </div>
+                  <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">{stat.value}</p>
+                </div>
+              );
+            })}
+          </div>
           
           {/* Search bar */}
-          <div className="mt-6">
+          <div className="mt-6 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_180px]">
             <div className="relative">
               <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                 <SearchIcon className="h-5 w-5 text-gray-400" aria-hidden="true" />
               </div>
               <input
                 type="text"
-                className="block w-full pl-10 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md leading-5 bg-white dark:bg-gray-700 placeholder-gray-500 dark:placeholder-gray-400 focus:outline-none focus:placeholder-gray-400 dark:focus:placeholder-gray-300 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm text-gray-900 dark:text-white"
+                className="block w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm leading-5 text-slate-900 placeholder-slate-500 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-[#3c3c3c] dark:bg-[#111113] dark:text-white dark:placeholder-slate-500"
                 placeholder="Search projects..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
+            <label className="relative">
+              <FunnelIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <select
+                value={visibilityFilter}
+                onChange={(event) => setVisibilityFilter(event.target.value)}
+                className="block w-full rounded-md border border-slate-300 bg-white py-3 pl-9 pr-3 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-[#3c3c3c] dark:bg-[#111113] dark:text-white"
+              >
+                <option value="all">All visibility</option>
+                <option value="private">Private only</option>
+                <option value="public">Public only</option>
+              </select>
+            </label>
+            <label>
+              <select
+                value={activityFilter}
+                onChange={(event) => setActivityFilter(event.target.value)}
+                className="block w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-[#3c3c3c] dark:bg-[#111113] dark:text-white"
+              >
+                <option value="all">All activity</option>
+                <option value="recent">Updated this week</option>
+                <option value="openTasks">Has open tasks</option>
+                <option value="snippets">Has snippets</option>
+              </select>
+            </label>
+            <label>
+              <select
+                value={sortBy}
+                onChange={(event) => setSortBy(event.target.value)}
+                className="block w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-[#3c3c3c] dark:bg-[#111113] dark:text-white"
+              >
+                <option value="updated">Sort: Recent</option>
+                <option value="name">Sort: Name</option>
+                <option value="created">Sort: Created</option>
+                <option value="tasks">Sort: Open tasks</option>
+              </select>
+            </label>
           </div>
         </div>
       </div>
 
       {/* Main content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        <section className="mb-8">
+          <div className="mb-4 flex flex-col gap-1">
+            <h3 className="text-lg font-semibold text-slate-950 dark:text-white">Start From A Template</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Pick a starter and Dev Deck will open the editor with matching boilerplate.
+            </p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            {templateList.map((template) => (
+              <Link
+                key={template.id}
+                to={`/projects/new?template=${template.id}`}
+                className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-500/50 hover:shadow-md dark:border-[#2b2b30] dark:bg-[#18181b]"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="rounded-md bg-sky-50 p-2 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300">
+                    <CodeBracketSquareIcon className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-slate-950 dark:text-white">{template.name}</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Use template</p>
+                  </div>
+                </div>
+                <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{template.description}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+
+        {pinnedProjects.length > 0 && (
+          <section className="mb-8">
+            <div className="mb-4 flex items-center justify-between">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-950 dark:text-white">Pinned Projects</h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">Your fastest path back into active work.</p>
+              </div>
+            </div>
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              {pinnedProjects.map((project) => {
+                const stats = getProjectWorkflowStats(project);
+
+                return (
+                  <Link
+                    key={project._id}
+                    to={`/projects/${project._id}`}
+                    className="rounded-lg border border-sky-500/30 bg-sky-50 p-4 text-sky-900 transition hover:bg-sky-100 dark:bg-sky-950/20 dark:text-sky-100 dark:hover:bg-sky-950/30"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold">{project.name}</p>
+                        <p className="mt-1 text-xs text-sky-700 dark:text-sky-300">
+                          {stats.openTasks} open tasks - {stats.snippets} snippets
+                        </p>
+                      </div>
+                      <StarIcon className="h-5 w-5 shrink-0 fill-sky-400 text-sky-500" />
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        <section className="mb-8">
+          <div className="mb-4 flex flex-col gap-1">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Dev Deck Implementation Priority</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Ordered from the most important developer workflow pieces to the platform features that can follow.
+            </p>
+          </div>
+          <div className="grid gap-4 lg:grid-cols-3">
+            {devDeckPriorities.map((group) => (
+              <article
+                key={group.stage}
+                className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-[#2b2b30] dark:bg-[#18181b]"
+              >
+                <div className="mb-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">{group.stage}</p>
+                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{group.summary}</p>
+                </div>
+                <div className="space-y-3">
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+
+                    return (
+                      <div key={item.label} className="flex items-start gap-3">
+                        <span className="mt-0.5 rounded-md bg-sky-50 p-2 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300">
+                          <Icon className="h-4 w-4" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-950 dark:text-white">{item.label}</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">{item.status}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
         {filteredProjects.length === 0 ? (
-          <div className="text-center">
+          <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center dark:border-[#3c3c3c] dark:bg-[#18181b]">
             <svg
               className="mx-auto h-12 w-12 text-gray-400"
               fill="none"
@@ -124,8 +411,8 @@ const ProjectsPage = () => {
                 d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            <h3 className="mt-2 text-sm font-medium text-gray-900 dark:text-white">No projects</h3>
-            <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            <h3 className="mt-2 text-sm font-medium text-slate-950 dark:text-white">No projects</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
               {searchQuery
                 ? 'No projects match your search.'
                 : 'Get started by creating a new project.'}
@@ -133,7 +420,7 @@ const ProjectsPage = () => {
             <div className="mt-6">
               <Link
                 to="/projects/new"
-                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                className="inline-flex items-center rounded-md border border-transparent bg-sky-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2"
               >
                 <PlusIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
                 New Project
@@ -142,39 +429,88 @@ const ProjectsPage = () => {
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            {filteredProjects.map((project) => (
-              <div
-                key={project._id}
-                className="bg-white dark:bg-gray-800 overflow-hidden shadow rounded-lg divide-y divide-gray-200 dark:divide-gray-700"
-              >
+            {filteredProjects.map((project) => {
+              const workflow = getProjectWorkflowStats(project);
+              const isPinned = pinnedProjectIds.includes(project._id);
+
+              return (
+                <article
+                  key={project._id}
+                  className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-[#2b2b30] dark:bg-[#18181b]"
+                >
                 <div className="px-4 py-5 sm:p-6">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white truncate">
+                    <h3 className="truncate text-lg font-semibold leading-6 text-slate-950 dark:text-white">
                       {project.name}
                     </h3>
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">
-                      {project.isPublic ? 'Public' : 'Private'}
-                    </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => togglePinnedProject(project._id)}
+                        className={`rounded-md p-1.5 transition ${
+                          isPinned
+                            ? 'text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-950/30'
+                            : 'text-slate-400 hover:bg-slate-100 hover:text-sky-600 dark:hover:bg-[#2d2d30]'
+                        }`}
+                        title={isPinned ? 'Unpin project' : 'Pin project'}
+                      >
+                        <StarIcon className={`h-5 w-5 ${isPinned ? 'fill-sky-400' : ''}`} />
+                      </button>
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                        project.isPublic
+                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                          : 'bg-slate-100 text-slate-700 dark:bg-[#2d2d30] dark:text-slate-300'
+                      }`}>
+                        {project.isPublic ? <GlobeAltIcon className="mr-1 h-3.5 w-3.5" /> : <LockClosedIcon className="mr-1 h-3.5 w-3.5" />}
+                        {project.isPublic ? 'Public' : 'Private'}
+                      </span>
+                    </div>
                   </div>
-                  <p className="mt-1 text-sm text-gray-500 dark:text-gray-400 line-clamp-2">
+                  <p className="mt-2 line-clamp-2 min-h-10 text-sm text-slate-500 dark:text-slate-400">
                     {project.description || 'No description'}
                   </p>
-                  <div className="mt-4 flex items-center text-sm text-gray-500 dark:text-gray-400">
+                  <div className="mt-4 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+                    <CalendarDaysIcon className="h-4 w-4 text-sky-500" />
                     <span>Updated {new Date(project.updatedAt).toLocaleDateString()}</span>
                   </div>
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="rounded-md bg-slate-50 p-2 dark:bg-[#111113]">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Open tasks</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{workflow.openTasks}</p>
+                    </div>
+                    <div className="rounded-md bg-slate-50 p-2 dark:bg-[#111113]">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Snippets</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{workflow.snippets}</p>
+                    </div>
+                    <div className="rounded-md bg-slate-50 p-2 dark:bg-[#111113]">
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Endpoints</p>
+                      <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{workflow.endpoints}</p>
+                    </div>
+                  </div>
+                  {workflow.totalTasks > 0 && (
+                    <div className="mt-4">
+                      <div className="mb-1 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+                        <span>Task progress</span>
+                        <span>{workflow.doneTasks}/{workflow.totalTasks}</span>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-[#2d2d30]">
+                        <div className="h-full rounded-full bg-sky-500" style={{ width: `${workflow.progress}%` }} />
+                      </div>
+                    </div>
+                  )}
                 </div>
-                <div className="px-4 py-4 sm:px-6">
-                  <div className="flex space-x-3">
+                <div className="border-t border-slate-200 px-4 py-4 dark:border-[#2b2b30] sm:px-6">
+                  <div className="flex flex-wrap gap-3">
                     <Link
                       to={`/projects/${project._id}`}
-                      className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-indigo-700 dark:text-indigo-200 bg-indigo-100 dark:bg-indigo-900 hover:bg-indigo-200 dark:hover:bg-indigo-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                      className="inline-flex items-center rounded-md border border-transparent bg-sky-100 px-3 py-2 text-sm font-medium leading-4 text-sky-700 hover:bg-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900"
                     >
                       <PencilIcon className="-ml-0.5 mr-2 h-4 w-4" aria-hidden="true" />
                       Edit
                     </Link>
                     <Link
                       to={`/projects/${project._id}`}
-                      className="inline-flex items-center px-3 py-2 border border-gray-300 dark:border-gray-600 text-sm leading-4 font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                      className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium leading-4 text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 dark:border-[#3c3c3c] dark:bg-[#1f1f23] dark:text-slate-200 dark:hover:bg-[#2d2d30]"
                     >
                       <EyeIcon className="-ml-0.5 mr-2 h-4 w-4" aria-hidden="true" />
                       View
@@ -182,15 +518,16 @@ const ProjectsPage = () => {
                     <button
                       type="button"
                       onClick={() => setShowDeleteModal(project._id)}
-                      className="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-red-700 dark:text-red-200 bg-red-100 dark:bg-red-900 hover:bg-red-200 dark:hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 ml-auto"
+                      className="ml-auto inline-flex items-center rounded-md border border-transparent bg-red-100 px-3 py-2 text-sm font-medium leading-4 text-red-700 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:bg-red-950/50 dark:text-red-200 dark:hover:bg-red-900"
                     >
                       <TrashIcon className="-ml-0.5 mr-2 h-4 w-4" aria-hidden="true" />
                       Delete
                     </button>
                   </div>
                 </div>
-              </div>
-            ))}
+                </article>
+              );
+            })}
           </div>
         )}
       </main>

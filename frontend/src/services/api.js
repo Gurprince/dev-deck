@@ -57,6 +57,9 @@ export const projectsApi = {
   create: (projectData) => api.post('/projects', projectData),
   update: (id, updates) => api.put(`/projects/${id}`, updates),
   delete: (id) => api.delete(`/projects/${id}`),
+  getWorkflow: (id) => api.get(`/projects/${id}/workflow`),
+  updateTasks: (id, tasks) => api.put(`/projects/${id}/tasks`, { tasks }),
+  updateSnippets: (id, snippets) => api.put(`/projects/${id}/snippets`, { snippets }),
   // Add a collaborator by email
   addCollaborator: async (projectId, { email, role = 'editor' }) => {
     try {

@@ -1,4 +1,7 @@
 @import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Add this to your global CSS or component's CSS module */
 pre {
     white-space: pre-wrap;

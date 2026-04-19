@@ -18,4 +18,8 @@ build/
 
 # Temp files
 backend/temp/
+backend/.env
 text.txt 
+
+temp/
+

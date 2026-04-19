@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { executeCode, stopExecution, executionStore } from '../services/codeExecutionService';
 
-export const useCodeExecution = (initialCode = '') => {
+export const useCodeExecution = () => {
   const [isExecuting, setIsExecuting] = useState(false);
   const [output, setOutput] = useState('');
   const [isServerRunning, setIsServerRunning] = useState(false);

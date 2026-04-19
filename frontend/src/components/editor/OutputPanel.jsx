@@ -56,8 +56,10 @@ const OutputPanel = ({
   isRunning = false,
   onClear,
   className = '',
+  surface = 'default',
 }) => {
   const { theme } = useTheme();
+  const ide = surface === 'ide';
   const endOfLogsRef = useRef(null);
   const [autoScroll, setAutoScroll] = useState(true);
 
@@ -75,23 +77,61 @@ const OutputPanel = ({
   };
 
   return (
-    <div className={`flex flex-col h-full ${className}`}>
-      <div className="flex items-center justify-between p-2 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex items-center
-         space-x-2">
-          <TerminalIcon className="h-5 w-5 text-gray-500" />
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
-            Output {isRunning && '(Running...)'}
-          </h3>
+    <div className={`flex flex-col h-full min-h-0 ${className}`}>
+      <div
+        className={`flex items-center justify-between gap-2 px-3 py-2.5 border-b shrink-0 ${
+          ide
+            ? isRunning
+              ? 'border-[#0e639c]/50 bg-[#1e1e1e]'
+              : 'border-[#2b2b30] bg-[#18181b]'
+            : isRunning
+              ? 'border-sky-300/80 dark:border-sky-500/40 bg-sky-50/80 dark:bg-sky-950/40'
+              : 'border-gray-200 dark:border-gray-700'
+        }`}
+      >
+        <div className="flex items-center gap-2 min-w-0">
+          <TerminalIcon
+            className={`h-5 w-5 shrink-0 ${
+              ide
+                ? isRunning
+                  ? 'text-[#0e639c]'
+                  : 'text-[#858585]'
+                : isRunning
+                  ? 'text-sky-600 dark:text-sky-400'
+                  : 'text-gray-500'
+            }`}
+          />
+          <div className="min-w-0">
+            <h3
+              className={`text-sm font-semibold truncate ${ide ? 'text-[#e4e4e7]' : 'text-gray-800 dark:text-gray-100'}`}
+            >
+              Console
+            </h3>
+            <p className={`text-xs ${ide ? 'text-[#858585]' : 'text-gray-500 dark:text-gray-400'}`}
+            >
+              {isRunning ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <span
+                    className={`inline-block h-1.5 w-1.5 rounded-full animate-pulse ${ide ? 'bg-[#38bdf8]' : 'bg-sky-500'}`}
+                  />
+                  Running...
+                </span>
+              ) : (
+                'Output from Run'
+              )}
+            </p>
+          </div>
         </div>
         <div className="flex items-center space-x-2">
           <button
             type="button"
             onClick={() => setAutoScroll(!autoScroll)}
             className={`text-xs px-2 py-1 rounded ${
-              theme === 'dark'
-                ? 'text-gray-300 hover:bg-gray-700'
-                : 'text-gray-600 hover:bg-gray-100'
+              ide
+                ? 'text-[#a1a1aa] hover:bg-[#2d2d30]'
+                : theme === 'dark'
+                  ? 'text-gray-300 hover:bg-gray-700'
+                  : 'text-gray-600 hover:bg-gray-100'
             }`}
           >
             {autoScroll ? 'Auto-scroll: On' : 'Auto-scroll: Off'}
@@ -100,9 +140,11 @@ const OutputPanel = ({
             type="button"
             onClick={onClear}
             className={`text-xs px-2 py-1 rounded ${
-              theme === 'dark'
-                ? 'text-gray-300 hover:bg-gray-700'
-                : 'text-gray-600 hover:bg-gray-100'
+              ide
+                ? 'text-[#a1a1aa] hover:bg-[#2d2d30]'
+                : theme === 'dark'
+                  ? 'text-gray-300 hover:bg-gray-700'
+                  : 'text-gray-600 hover:bg-gray-100'
             }`}
             disabled={logs.length === 0}
           >
@@ -111,14 +153,24 @@ const OutputPanel = ({
         </div>
       </div>
       <div
-        className={`flex-1 overflow-y-auto p-2 font-mono text-sm ${
-          theme === 'dark' ? 'bg-gray-900 text-gray-200' : 'bg-white text-gray-800'
+        className={`flex-1 min-h-0 overflow-y-auto p-3 font-mono text-sm leading-relaxed ${
+          ide
+            ? 'bg-[#1e1e1e] text-[#cccccc] border-t border-[#2b2b30]'
+            : theme === 'dark'
+              ? 'bg-slate-950 text-gray-200 border-t border-slate-800'
+              : 'bg-slate-50 text-gray-800 border-t border-gray-100'
         }`}
         onScroll={handleScroll}
       >
         {logs.length === 0 ? (
-          <div className="h-full flex items-center justify-center text-gray-500">
-            No output yet. Run your code to see the results here.
+          <div
+            className={`h-full min-h-[12rem] flex flex-col items-center justify-center gap-2 text-center px-4 ${ide ? 'text-[#858585]' : 'text-gray-500 dark:text-gray-400'}`}
+          >
+            <TerminalIcon className="h-10 w-10 opacity-40" aria-hidden />
+            <p className="text-sm font-medium">No output yet</p>
+            <p className="text-xs max-w-sm">
+              Click <span className="font-semibold text-gray-700 dark:text-gray-300">Run</span> in the toolbar to execute your code. Timings show browser and server run time.
+            </p>
           </div>
         ) : (
           <div className="space-y-1">

@@ -1,156 +1,397 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useCallback } from 'react';
+import {
+  ArrowPathIcon,
+  CheckCircleIcon,
+  ClockIcon,
+  PaperAirplaneIcon,
+  XCircleIcon,
+} from '@heroicons/react/24/outline';
 import { executionApi } from '../../services/api';
 
-const methods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
+const methods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+
+const methodStyles = {
+  GET: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  POST: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+  PUT: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+  PATCH: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
+  DELETE: 'bg-red-500/15 text-red-300 border-red-500/30',
+};
+
+const getJsonState = (value, allowEmpty = false) => {
+  if (allowEmpty && !value.trim()) return { valid: true, parsed: null };
+
+  try {
+    return { valid: true, parsed: JSON.parse(value || '{}') };
+  } catch (error) {
+    return { valid: false, error: error.message };
+  }
+};
+
+const formatJson = (value, fallback) => {
+  const state = getJsonState(value, true);
+  return state.valid ? JSON.stringify(state.parsed ?? fallback, null, 2) : value;
+};
 
 const TestRunner = ({ endpoints = [], projectId }) => {
-  const first = endpoints[0];
-  const [selectedIdx, setSelectedIdx] = useState(0);
-  const [method, setMethod] = useState(first?.method || 'GET');
-  const [path, setPath] = useState(first?.path || '/');
-  const [headers, setHeaders] = useState('{"Content-Type":"application/json"}');
   const storageKey = projectId ? `devdeck:test:${projectId}` : 'devdeck:test:global';
-  const [baseUrl, setBaseUrl] = useState(() => {
+  const savedSettings = useMemo(() => {
     try {
       const raw = localStorage.getItem(storageKey);
-      return raw ? JSON.parse(raw).baseUrl || '' : '';
-    } catch { return ''; }
-  });
-  const [body, setBody] = useState('{}');
-  const [resp, setResp] = useState(null);
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }, [storageKey]);
+
+  const firstEndpoint = endpoints[0];
+  const [selectedIdx, setSelectedIdx] = useState(0);
+  const [method, setMethod] = useState(savedSettings.method || firstEndpoint?.method || 'GET');
+  const [path, setPath] = useState(savedSettings.path || firstEndpoint?.path || '/');
+  const [headers, setHeaders] = useState(savedSettings.headers || '{\n  "Content-Type": "application/json"\n}');
+  const [baseUrl, setBaseUrl] = useState(savedSettings.baseUrl || '');
+  const [body, setBody] = useState(savedSettings.body || '{}');
+  const [params, setParams] = useState(savedSettings.params || {});
+  const [response, setResponse] = useState(null);
+  const [history, setHistory] = useState(savedSettings.history || []);
   const [loading, setLoading] = useState(false);
-  const [params, setParams] = useState({});
 
   const paramNames = useMemo(() => {
     const names = [];
     const re = /:([^/]+)/g;
-    let m;
-    const p = (endpoints[selectedIdx]?.path || path || '') + '';
-    while ((m = re.exec(p)) !== null) names.push(m[1]);
+    let match;
+    const sourcePath = `${path || ''}`;
+
+    while ((match = re.exec(sourcePath)) !== null) {
+      names.push(match[1]);
+    }
+
     return names;
-  }, [selectedIdx, endpoints, path]);
+  }, [path]);
 
   const resolvedPath = useMemo(() => {
-    let p = path || '';
+    let nextPath = path || '';
     for (const name of paramNames) {
-      const val = params[name] ?? '';
-      p = p.replace(`:${name}`, encodeURIComponent(val));
+      nextPath = nextPath.replace(`:${name}`, encodeURIComponent(params[name] ?? ''));
     }
-    return p;
+    return nextPath;
   }, [path, params, paramNames]);
 
-  const onRun = async () => {
-    setLoading(true);
-    setResp(null);
+  const requestUrl = useMemo(() => {
+    if (!resolvedPath) return '';
+    if (/^https?:\/\//i.test(resolvedPath)) return resolvedPath;
+    const normalizedBase = baseUrl.endsWith('/') ? baseUrl.slice(0, -1) : baseUrl;
+    const normalizedPath = resolvedPath.startsWith('/') ? resolvedPath : `/${resolvedPath}`;
+    return `${normalizedBase}${normalizedPath}`;
+  }, [baseUrl, resolvedPath]);
+
+  const headerState = getJsonState(headers);
+  const bodyState = getJsonState(body, ['GET', 'DELETE'].includes(method));
+  const urlIsValid = /^https?:\/\//i.test(requestUrl);
+  const canSend = urlIsValid && headerState.valid && bodyState.valid && !loading;
+
+  const persist = useCallback(() => {
     try {
-      const hdrs = JSON.parse(headers || '{}');
-      const bdy = body && body.trim() ? JSON.parse(body) : null;
-      // If a relative path is provided, prepend baseUrl; otherwise use absolute URL
-      const url = resolvedPath.startsWith('http') ? resolvedPath : `${baseUrl || ''}${resolvedPath}`;
+      localStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          baseUrl,
+          method,
+          path,
+          headers,
+          body,
+          params,
+          history: history.slice(0, 8),
+        })
+      );
+    } catch {
+      /* ignore quota */
+    }
+  }, [baseUrl, body, headers, history, method, params, path, storageKey]);
+
+  useEffect(() => {
+    persist();
+  }, [persist]);
+
+  useEffect(() => {
+    if (!endpoints.length) return;
+    const endpoint = endpoints[selectedIdx] || endpoints[0];
+    if (!endpoint) return;
+
+    setMethod(endpoint.method || 'GET');
+    setPath(endpoint.path || '/');
+
+    const nextParams = {};
+    const re = /:([^/]+)/g;
+    let match;
+    while ((match = re.exec(endpoint.path || '')) !== null) {
+      nextParams[match[1]] = params[match[1]] || '';
+    }
+    setParams(nextParams);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- endpoint selection should not reset from param typing
+  }, [selectedIdx, endpoints]);
+
+  const handleRun = async () => {
+    if (!canSend) return;
+
+    setLoading(true);
+    setResponse(null);
+    const startedAt = performance.now();
+
+    try {
       const { data } = await executionApi.testEndpoint({
-        url,
+        url: requestUrl,
         method,
-        headers: hdrs,
-        body: bdy,
+        headers: headerState.parsed,
+        body: ['GET', 'DELETE'].includes(method) ? null : bodyState.parsed,
       });
-      setResp(data);
-    } catch (e) {
-      setResp({ error: e.message || 'Failed to run request' });
+      const durationMs = Math.round(performance.now() - startedAt);
+      const nextResponse = { ...data, durationMs, url: requestUrl, method };
+
+      setResponse(nextResponse);
+      setHistory((items) => [
+        {
+          id: `request-${Date.now()}`,
+          method,
+          url: requestUrl,
+          status: data.status,
+          durationMs,
+          at: new Date().toISOString(),
+        },
+        ...items,
+      ].slice(0, 8));
+    } catch (error) {
+      const durationMs = Math.round(performance.now() - startedAt);
+      const nextResponse = {
+        error: error.message || 'Failed to run request',
+        durationMs,
+        url: requestUrl,
+        method,
+      };
+      setResponse(nextResponse);
+      setHistory((items) => [
+        {
+          id: `request-${Date.now()}`,
+          method,
+          url: requestUrl,
+          status: 'ERR',
+          durationMs,
+          at: new Date().toISOString(),
+        },
+        ...items,
+      ].slice(0, 8));
     } finally {
       setLoading(false);
     }
   };
 
-  // Persist settings
-  const persist = () => {
-    try { localStorage.setItem(storageKey, JSON.stringify({ baseUrl, method, path, headers, body })); } catch {}
+  const selectHistoryItem = (item) => {
+    setMethod(item.method);
+    setPath(item.url);
   };
-  
-  // Auto-persist on key changes
-  useEffect(() => { persist(); }, [baseUrl, method, path, headers, body]);
 
-  const onSelectEndpoint = (idx) => {
-    const ep = endpoints[idx];
-    setSelectedIdx(idx);
-    if (ep) {
-      setMethod(ep.method || 'GET');
-      setPath(ep.path || '/');
-      // Initialize params with blanks
-      const newParams = {};
-      const re = /:([^/]+)/g;
-      let m;
-      while ((m = re.exec(ep.path || '')) !== null) newParams[m[1]] = '';
-      setParams(newParams);
-    }
-  };
+  const statusOk = response?.status >= 200 && response?.status < 300;
+  const statusLabel = response?.status ? `${response.status} ${response.statusText || ''}`.trim() : response?.error ? 'Request failed' : 'Not sent';
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center space-x-2">
-        <label className="text-sm opacity-80">Base URL</label>
-        <input
-          value={baseUrl}
-          onChange={(e) => setBaseUrl(e.target.value)}
-          className="flex-1 px-2 py-1 border rounded"
-          placeholder="http://127.0.0.1:PORT"
-        />
-      </div>
-      {endpoints.length > 0 && (
-        <div className="flex items-center space-x-2">
-          <label className="text-sm opacity-80">Endpoint</label>
-          <select
-            value={selectedIdx}
-            onChange={(e) => onSelectEndpoint(Number(e.target.value))}
-            className="px-2 py-1 border rounded flex-1 bg-white text-black"
-          >
-            {endpoints.map((ep, i) => (
-              <option key={`${ep.method}-${ep.path}-${i}`} value={i}>
-                {ep.method} {ep.path}
-              </option>
-            ))}
-          </select>
+    <div className="h-full overflow-auto bg-[#111113] p-4 text-[#e4e4e7]">
+      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div>
+          <h3 className="text-base font-semibold">Endpoint Tester</h3>
+          <p className="text-sm text-[#a1a1aa]">Send requests against a running project server and inspect status, headers, timing, and response data.</p>
         </div>
-      )}
-      <div className="flex items-center space-x-2">
-        <select value={method} onChange={(e) => setMethod(e.target.value)} className="px-2 py-1 border rounded">
-          {methods.map(m => <option key={m} value={m}>{m}</option>)}
-        </select>
-        <input value={path} onChange={(e) => setPath(e.target.value)} className="flex-1 px-2 py-1 border rounded" placeholder="http://localhost:3000/api/hello or /api/hello" />
-        <button onClick={onRun} disabled={loading} className="px-3 py-1 rounded bg-indigo-600 text-white">{loading ? 'Testing...' : 'Send'}</button>
+        <button
+          type="button"
+          onClick={handleRun}
+          disabled={!canSend}
+          className="inline-flex w-fit items-center rounded-md bg-[#0ea5e9] px-3 py-2 text-sm font-medium text-white hover:bg-[#0284c7] disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {loading ? <ArrowPathIcon className="mr-2 h-4 w-4 animate-spin" /> : <PaperAirplaneIcon className="mr-2 h-4 w-4" />}
+          {loading ? 'Sending...' : 'Send request'}
+        </button>
       </div>
-      {paramNames.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-          {paramNames.map((name) => (
-            <div key={name}>
-              <div className="text-xs opacity-80 mb-1">Path param: {name}</div>
+
+      <div className="grid gap-4 xl:grid-cols-[260px_minmax(0,1fr)_360px]">
+        <aside className="rounded-md border border-[#2b2b30] bg-[#18181b]">
+          <div className="border-b border-[#2b2b30] px-3 py-2">
+            <p className="text-sm font-semibold">Detected endpoints</p>
+            <p className="text-xs text-[#858585]">{endpoints.length || 0} from route scan</p>
+          </div>
+          <div className="max-h-[34rem] space-y-1 overflow-auto p-2">
+            {endpoints.length ? (
+              endpoints.map((endpoint, index) => (
+                <button
+                  key={`${endpoint.method}-${endpoint.path}-${index}`}
+                  type="button"
+                  onClick={() => setSelectedIdx(index)}
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-2 text-left text-sm transition-colors ${
+                    selectedIdx === index
+                      ? 'bg-[#2d2d30] text-[#f4f4f5]'
+                      : 'text-[#a1a1aa] hover:bg-[#242428] hover:text-[#e4e4e7]'
+                  }`}
+                >
+                  <span className={`rounded border px-2 py-0.5 text-[11px] font-semibold ${methodStyles[endpoint.method] || methodStyles.GET}`}>
+                    {endpoint.method || 'GET'}
+                  </span>
+                  <span className="min-w-0 truncate font-mono text-xs">{endpoint.path}</span>
+                </button>
+              ))
+            ) : (
+              <p className="rounded-md border border-dashed border-[#3c3c3c] p-3 text-sm text-[#858585]">
+                Run code first to scan Express routes, or enter a path manually.
+              </p>
+            )}
+          </div>
+        </aside>
+
+        <section className="space-y-4">
+          <div className="rounded-md border border-[#2b2b30] bg-[#18181b] p-3">
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-[#858585]">Base URL</label>
+            <input
+              value={baseUrl}
+              onChange={(event) => setBaseUrl(event.target.value)}
+              className="w-full rounded-md border border-[#3c3c3c] bg-[#111113] px-3 py-2 text-sm text-[#f4f4f5] placeholder-[#71717a] focus:border-[#38bdf8] focus:outline-none"
+              placeholder="http://127.0.0.1:PORT"
+            />
+            <p className={`mt-2 truncate text-xs ${urlIsValid || !requestUrl ? 'text-[#858585]' : 'text-amber-300'}`}>
+              Request URL: {requestUrl || 'Add a base URL and path'}
+              {!urlIsValid && requestUrl ? ' - absolute URL required' : ''}
+            </p>
+          </div>
+
+          <div className="rounded-md border border-[#2b2b30] bg-[#18181b] p-3">
+            <div className="grid gap-2 md:grid-cols-[140px_minmax(0,1fr)]">
+              <select
+                value={method}
+                onChange={(event) => setMethod(event.target.value)}
+                className="rounded-md border border-[#3c3c3c] bg-[#111113] px-3 py-2 text-sm text-[#f4f4f5] focus:border-[#38bdf8] focus:outline-none"
+              >
+                {methods.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
               <input
-                value={params[name] ?? ''}
-                onChange={(e) => setParams((prev) => ({ ...prev, [name]: e.target.value }))}
-                className="w-full px-2 py-1 border rounded"
-                placeholder={name}
+                value={path}
+                onChange={(event) => setPath(event.target.value)}
+                className="rounded-md border border-[#3c3c3c] bg-[#111113] px-3 py-2 font-mono text-sm text-[#f4f4f5] placeholder-[#71717a] focus:border-[#38bdf8] focus:outline-none"
+                placeholder="/api/hello or http://localhost:3000/api/hello"
               />
             </div>
-          ))}
-        </div>
-      )}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <div className="text-sm mb-1">Headers (JSON)</div>
-          <textarea value={headers} onChange={(e) => setHeaders(e.target.value)} rows={6} className="w-full border rounded p-2 font-mono text-sm" />
-        </div>
-        <div>
-          <div className="text-sm mb-1">Body (JSON)</div>
-          <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={6} className="w-full border rounded p-2 font-mono text-sm" />
-        </div>
-      </div>
-      <div>
-        <div className="text-sm mb-1">Response</div>
-        <pre className="w-full border rounded p-2 bg-gray-50 text-black overflow-auto text-sm">{resp ? JSON.stringify(resp, null, 2) : 'No response yet.'}</pre>
+          </div>
+
+          {paramNames.length > 0 && (
+            <div className="rounded-md border border-[#2b2b30] bg-[#18181b] p-3">
+              <p className="mb-2 text-sm font-semibold">Path parameters</p>
+              <div className="grid gap-2 md:grid-cols-3">
+                {paramNames.map((name) => (
+                  <label key={name} className="block">
+                    <span className="mb-1 block text-xs text-[#858585]">{name}</span>
+                    <input
+                      value={params[name] ?? ''}
+                      onChange={(event) => setParams((prev) => ({ ...prev, [name]: event.target.value }))}
+                      className="w-full rounded-md border border-[#3c3c3c] bg-[#111113] px-3 py-2 text-sm text-[#f4f4f5] focus:border-[#38bdf8] focus:outline-none"
+                      placeholder={name}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-md border border-[#2b2b30] bg-[#18181b]">
+              <div className="flex items-center justify-between border-b border-[#2b2b30] px-3 py-2">
+                <p className="text-sm font-semibold">Headers</p>
+                <button type="button" onClick={() => setHeaders(formatJson(headers, {}))} className="text-xs text-sky-300 hover:text-sky-200">Format</button>
+              </div>
+              <textarea
+                value={headers}
+                onChange={(event) => setHeaders(event.target.value)}
+                rows={8}
+                className="w-full resize-y bg-[#111113] p-3 font-mono text-xs leading-relaxed text-[#d4d4d8] outline-none"
+              />
+              {!headerState.valid && <p className="border-t border-red-500/30 px-3 py-2 text-xs text-red-300">{headerState.error}</p>}
+            </div>
+
+            <div className="rounded-md border border-[#2b2b30] bg-[#18181b]">
+              <div className="flex items-center justify-between border-b border-[#2b2b30] px-3 py-2">
+                <p className="text-sm font-semibold">Body</p>
+                <button type="button" onClick={() => setBody(formatJson(body, {}))} className="text-xs text-sky-300 hover:text-sky-200">Format</button>
+              </div>
+              <textarea
+                value={body}
+                onChange={(event) => setBody(event.target.value)}
+                disabled={['GET', 'DELETE'].includes(method)}
+                rows={8}
+                className="w-full resize-y bg-[#111113] p-3 font-mono text-xs leading-relaxed text-[#d4d4d8] outline-none disabled:text-[#71717a]"
+              />
+              {!bodyState.valid && <p className="border-t border-red-500/30 px-3 py-2 text-xs text-red-300">{bodyState.error}</p>}
+            </div>
+          </div>
+        </section>
+
+        <aside className="space-y-4">
+          <section className="rounded-md border border-[#2b2b30] bg-[#18181b]">
+            <div className="flex items-center justify-between border-b border-[#2b2b30] px-3 py-2">
+              <p className="text-sm font-semibold">Response</p>
+              <span className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-medium ${
+                response?.error ? 'border-red-500/30 bg-red-500/15 text-red-300' :
+                  response ? (statusOk ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300' : 'border-amber-500/30 bg-amber-500/15 text-amber-300') :
+                    'border-[#3c3c3c] bg-[#2d2d30] text-[#a1a1aa]'
+              }`}>
+                {response?.error ? <XCircleIcon className="mr-1 h-3.5 w-3.5" /> : response ? <CheckCircleIcon className="mr-1 h-3.5 w-3.5" /> : null}
+                {statusLabel}
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 border-b border-[#2b2b30] p-3 text-xs text-[#a1a1aa]">
+              <div className="rounded-md bg-[#111113] p-2">
+                <p className="text-[#71717a]">Time</p>
+                <p className="mt-1 font-semibold text-[#e4e4e7]">{response?.durationMs ?? '-'} ms</p>
+              </div>
+              <div className="rounded-md bg-[#111113] p-2">
+                <p className="text-[#71717a]">Method</p>
+                <p className="mt-1 font-semibold text-[#e4e4e7]">{response?.method || method}</p>
+              </div>
+            </div>
+            <pre className="max-h-[28rem] overflow-auto bg-[#0f172a] p-3 text-xs leading-relaxed text-[#d4d4d8]">
+              {response ? JSON.stringify(response.error ? response : response.data, null, 2) : 'No response yet.'}
+            </pre>
+          </section>
+
+          <section className="rounded-md border border-[#2b2b30] bg-[#18181b]">
+            <div className="border-b border-[#2b2b30] px-3 py-2">
+              <p className="text-sm font-semibold">History</p>
+              <p className="text-xs text-[#858585]">Recent requests on this project</p>
+            </div>
+            <div className="max-h-64 space-y-1 overflow-auto p-2">
+              {history.length ? (
+                history.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => selectHistoryItem(item)}
+                    className="w-full rounded-md px-2 py-2 text-left hover:bg-[#242428]"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${methodStyles[item.method] || methodStyles.GET}`}>{item.method}</span>
+                      <span className="truncate font-mono text-xs text-[#d4d4d8]">{item.url}</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-xs text-[#858585]">
+                      <span>{item.status}</span>
+                      <ClockIcon className="h-3.5 w-3.5" />
+                      <span>{item.durationMs}ms</span>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <p className="rounded-md border border-dashed border-[#3c3c3c] p-3 text-sm text-[#858585]">No requests yet.</p>
+              )}
+            </div>
+          </section>
+        </aside>
       </div>
     </div>
   );
 };
 
 export default TestRunner;
-
-

@@ -1,7 +1,7 @@
 // frontend/src/services/projectService.js
 import axios from "axios";
 
-export const saveProject = async (code, routes) => {
+export const saveProject = async (code) => {
   const response = await axios.post("http://localhost:3000/api/projects", {
     code,
     name: "Untitled Project",

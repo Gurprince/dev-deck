@@ -243,3 +243,5 @@ export const __test__ = {
   cleanupServers,
   runningServers
 };
+
+export { killProcess, runningServers };

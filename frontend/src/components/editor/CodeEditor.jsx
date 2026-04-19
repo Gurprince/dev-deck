@@ -15,12 +15,11 @@ const CodeEditor = ({
   language = 'javascript',
   theme: customTheme,
   options = {},
-  height = '100%',
-  width = '100%',
   onMount = () => {},
   onValidate = () => {},
   projectId,
   isReadOnly = false,
+  showInlineActions = true,
   className = '',
 }) => {
   const { theme: appTheme } = useTheme();
@@ -30,12 +29,12 @@ const CodeEditor = ({
   const [isExecuting, setIsExecuting] = useState(false);
   const [output, setOutput] = useState('');
   const [isServerRunning, setIsServerRunning] = useState(false);
-  const [isMounted, setIsMounted] = useState(false);
   const [localValue, setLocalValue] = useState(value);
-  const [collaboratorCursors, setCollaboratorCursors] = useState({});
-  const [comments, setComments] = useState([]);
-  const [activeComment, setActiveComment] = useState(null);
-  const [commentPosition, setCommentPosition] = useState({ x: 0, y: 0 });
+  const [cursorPosition, setCursorPosition] = useState({ lineNumber: 1, column: 1 });
+  const [, setCollaboratorCursors] = useState({});
+  const [, setComments] = useState([]);
+  const [, setActiveComment] = useState(null);
+  const [, setCommentPosition] = useState({ x: 0, y: 0 });
   const [socket, setSocket] = useState(null);
 
   // Initialize socket connection
@@ -111,10 +110,12 @@ const CodeEditor = ({
   }, [socket, projectId, handleCodeUpdate, handleCursorUpdate, handleCommentUpdate]);
 
   // Handle external value changes
+  // Sync from parent when `value` changes; omit localValue from deps to avoid clobbering in-progress edits
   useEffect(() => {
     if (editorRef.current && value !== localValue) {
       setLocalValue(value);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only re-sync when parent `value` changes
   }, [value]);
 
   // Throttled functions for WebSocket events
@@ -156,11 +157,12 @@ const CodeEditor = ({
   }, [onChange, projectId, throttledSendCodeUpdate]);
 
   // Handle cursor position changes
-  const handleCursorChange = useCallback((e) => {
+  const handleCursorChange = useCallback(() => {
     if (!editorRef.current || !projectId || !user?.id) return;
     
     const position = editorRef.current.getPosition();
     if (position) {
+      setCursorPosition(position);
       throttledSendCursorPosition({
         lineNumber: position.lineNumber,
         column: position.column
@@ -202,17 +204,57 @@ const CodeEditor = ({
   // Handle editor mount
   const handleEditorDidMount = (editor, monaco) => {
     editorRef.current = editor;
-    setIsMounted(true);
 
     // Configure editor options
     editor.updateOptions({
       minimap: { enabled: true },
       scrollBeyondLastLine: false,
       fontSize: 14,
+      lineHeight: 22,
       wordWrap: 'on',
       automaticLayout: true,
       formatOnPaste: true,
       formatOnType: true,
+      cursorBlinking: 'smooth',
+      cursorSmoothCaretAnimation: 'on',
+      bracketPairColorization: { enabled: true },
+      guides: {
+        bracketPairs: true,
+        indentation: true,
+      },
+      padding: {
+        top: 14,
+        bottom: 14,
+      },
+      renderWhitespace: 'selection',
+      smoothScrolling: true,
+    });
+
+    monaco.editor.defineTheme('devdeck-editor-dark', {
+      base: 'vs-dark',
+      inherit: true,
+      rules: [
+        { token: 'comment', foreground: '7a869a' },
+        { token: 'keyword', foreground: '7dd3fc' },
+        { token: 'string', foreground: '86efac' },
+        { token: 'number', foreground: 'fbbf24' },
+        { token: 'type', foreground: 'c4b5fd' },
+      ],
+      colors: {
+        'editor.background': '#111113',
+        'editor.foreground': '#e4e4e7',
+        'editor.lineHighlightBackground': '#1f293730',
+        'editorCursor.foreground': '#38bdf8',
+        'editorLineNumber.foreground': '#6b7280',
+        'editorLineNumber.activeForeground': '#e4e4e7',
+        'editor.selectionBackground': '#0e749033',
+        'editor.inactiveSelectionBackground': '#33415555',
+        'editorIndentGuide.background1': '#27272a',
+        'editorIndentGuide.activeBackground1': '#38bdf8',
+        'editorGutter.background': '#111113',
+        'scrollbarSlider.background': '#3f3f4680',
+        'scrollbarSlider.hoverBackground': '#52525b99',
+      },
     });
 
     // Add context menu for comments
@@ -248,7 +290,10 @@ const CodeEditor = ({
     });
 
     // Track cursor position changes
-    editor.onDidChangeCursorPosition(handleCursorChange);
+    editor.onDidChangeCursorPosition((event) => {
+      setCursorPosition(event.position);
+      handleCursorChange();
+    });
 
     // Register custom language if needed
     monaco.languages.register({ id: 'http' });
@@ -258,8 +303,8 @@ const CodeEditor = ({
         root: [
           [/^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+/, 'keyword'],
           [/\s(HTTP\/\d\.\d)/, 'type'],
-          [/(https?:\/\/[^\s\{\}\]]+)/, 'string'],
-          [/\{\{[^\}]*\}\}/, 'variable'],
+          [/(https?:\/\/[^\s{}]+)/, 'string'],
+          [/\{\{[^}]*\}\}/, 'variable'],
           [/\/\/.*$/, 'comment'],
         ],
       },
@@ -345,52 +390,85 @@ const CodeEditor = ({
   };
 
   // Determine theme based on app theme or custom theme
-  const editorTheme = customTheme || (appTheme === 'dark' ? 'vs-dark' : 'light');
+  const editorTheme = customTheme || (appTheme === 'dark' ? 'devdeck-editor-dark' : 'vs');
+  const lineCount = localValue ? localValue.split('\n').length : 1;
+  const characterCount = localValue.length;
 
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex justify-between items-center p-2 bg-gray-100 dark:bg-gray-800">
-        <div className="flex space-x-2">
-          <Button
-            onClick={handleRunCode}
-            disabled={isExecuting}
-            variant="outline"
-            size="sm"
-          >
-            {isExecuting ? 'Running...' : 'Run Code'}
-          </Button>
-          {isServerRunning && (
-            <Button
-              onClick={handleStopExecution}
-              variant="destructive"
-              size="sm"
-            >
-              Stop Server
-            </Button>
-          )}
+    <div className={`flex h-full min-h-0 flex-col bg-white text-slate-900 dark:bg-[#111113] dark:text-[#e4e4e7] ${className}`}>
+      <div className="flex min-h-11 items-center justify-between gap-3 border-b border-slate-200 bg-white px-3 dark:border-[#2b2b30] dark:bg-[#18181b]">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="h-2.5 w-2.5 rounded-full bg-[#22c55e]" aria-hidden />
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-slate-950 dark:text-[#f4f4f5]">app.{language === 'typescript' ? 'ts' : language === 'json' ? 'json' : 'js'}</p>
+            <p className="text-xs text-slate-500 dark:text-[#a1a1aa]">
+              {isReadOnly ? 'Read only' : 'Live editing'} - Wrap on - Auto format
+            </p>
+          </div>
         </div>
-        <div className="text-sm text-gray-500">
-          {language.toUpperCase()}
+
+        <div className="flex shrink-0 items-center gap-2">
+          {showInlineActions && (
+            <>
+              <Button
+                onClick={handleRunCode}
+                disabled={isExecuting}
+                variant="outline"
+                size="sm"
+              >
+                {isExecuting ? 'Running...' : 'Run Code'}
+              </Button>
+              {isServerRunning && (
+                <Button
+                  onClick={handleStopExecution}
+                  variant="destructive"
+                  size="sm"
+                >
+                  Stop Server
+                </Button>
+              )}
+            </>
+          )}
+          <span className="rounded bg-slate-100 px-2 py-1 text-xs font-medium text-slate-700 dark:bg-[#2d2d30] dark:text-[#d4d4d8]">
+            {language.toUpperCase()}
+          </span>
         </div>
       </div>
-      <div className="flex-1">
+
+      <div className="min-h-0 flex-1">
         <Editor
-          height="70vh"
+          height="100%"
           defaultLanguage={language}
           value={localValue}
           onChange={handleChange}
           onCursorPositionChange={handleCursorChange}
           theme={editorTheme}
           onMount={handleEditorDidMount}
+          onValidate={handleValidate}
           options={{
             ...options,
             readOnly: isReadOnly,
           }}
         />
       </div>
-      <div className="h-1/3 bg-gray-900 text-green-400 font-mono text-sm p-4 overflow-auto">
-        <pre>{output}</pre>
+
+      <div className="flex min-h-8 items-center justify-between gap-3 border-t border-slate-200 bg-white px-3 text-xs text-slate-500 dark:border-[#2b2b30] dark:bg-[#18181b] dark:text-[#a1a1aa]">
+        <div className="flex min-w-0 items-center gap-3">
+          <span>Ln {cursorPosition.lineNumber}, Col {cursorPosition.column}</span>
+          <span>{lineCount} lines</span>
+          <span>{characterCount} chars</span>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <span>{isReadOnly ? 'Protected' : 'Editable'}</span>
+          <span>UTF-8</span>
+          <span>LF</span>
+        </div>
       </div>
+      {showInlineActions && output && (
+        <div className="max-h-56 overflow-auto border-t border-[#2b2b30] bg-[#0f172a] p-4 font-mono text-sm text-[#86efac]">
+          <pre>{output}</pre>
+        </div>
+      )}
     </div>
   );
 };

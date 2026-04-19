@@ -13,7 +13,7 @@ import { getVersions, rollbackVersion } from "../services/projectService";
 import { generateSwaggerSpec } from "../services/parserService";
 
 const Dashboard = () => {
-  const { code, routes, setCode, setRoutes, projectId } =
+  const { routes, setCode, setRoutes, projectId } =
     useContext(ProjectContext);
   const [activeTab, setActiveTab] = useState("editor");
   const [collaborators, setCollaborators] = useState([

@@ -7,6 +7,43 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = express.Router();
 
+const canWriteProject = (project, userId) => {
+  const currentUserId = userId?.toString();
+  const isOwner = project.owner && project.owner.toString() === currentUserId;
+  const isPrivilegedCollaborator = project.collaborators?.some(
+    (c) => c.user?.toString() === currentUserId && ['admin', 'editor'].includes(c.role)
+  );
+
+  return isOwner || isPrivilegedCollaborator;
+};
+
+const normalizeTasks = (tasks = [], userId) =>
+  (Array.isArray(tasks) ? tasks : [])
+    .filter((task) => task?.title?.trim())
+    .slice(0, 100)
+    .map((task) => ({
+      _id: mongoose.Types.ObjectId.isValid(task._id) ? task._id : undefined,
+      title: task.title.trim().slice(0, 160),
+      status: ['todo', 'doing', 'done'].includes(task.status) ? task.status : 'todo',
+      priority: ['Low', 'Medium', 'High'].includes(task.priority) ? task.priority : 'Medium',
+      createdBy: task.createdBy || userId,
+      createdAt: task.createdAt || new Date(),
+      updatedAt: new Date()
+    }));
+
+const normalizeSnippets = (snippets = [], userId) =>
+  (Array.isArray(snippets) ? snippets : [])
+    .filter((snippet) => snippet?.title?.trim() && typeof snippet.code === 'string' && snippet.code.length > 0)
+    .slice(0, 100)
+    .map((snippet) => ({
+      _id: mongoose.Types.ObjectId.isValid(snippet._id) ? snippet._id : undefined,
+      title: snippet.title.trim().slice(0, 120),
+      language: (snippet.language || 'javascript').trim().slice(0, 40),
+      code: snippet.code.slice(0, 50000),
+      createdBy: snippet.createdBy || userId,
+      createdAt: snippet.createdAt || new Date()
+    }));
+
 // Middleware to check project ownership or collaboration
 const checkProjectAccess = async (req, res, next) => {
   try {
@@ -83,6 +120,48 @@ router.get('/', authenticateToken, async (req, res, next) => {
     res.json(projects);
   } catch (error) {
     console.error('Error fetching projects:', error);
+    next(error);
+  }
+});
+
+// Get project workflow data
+router.get('/:id/workflow', authenticateToken, checkProjectAccess, async (req, res, next) => {
+  try {
+    res.json({
+      tasks: req.project.tasks || [],
+      snippets: req.project.snippets || []
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Replace task board for a project
+router.put('/:id/tasks', authenticateToken, checkProjectAccess, async (req, res, next) => {
+  try {
+    if (!canWriteProject(req.project, req.user.userId)) {
+      return res.status(403).json({ message: 'Only owners, admins, and editors can update tasks' });
+    }
+
+    req.project.tasks = normalizeTasks(req.body.tasks, req.user.userId);
+    await req.project.save();
+    res.json({ tasks: req.project.tasks });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Replace snippets for a project
+router.put('/:id/snippets', authenticateToken, checkProjectAccess, async (req, res, next) => {
+  try {
+    if (!canWriteProject(req.project, req.user.userId)) {
+      return res.status(403).json({ message: 'Only owners, admins, and editors can update snippets' });
+    }
+
+    req.project.snippets = normalizeSnippets(req.body.snippets, req.user.userId);
+    await req.project.save();
+    res.json({ snippets: req.project.snippets });
+  } catch (error) {
     next(error);
   }
 });

@@ -65,6 +65,7 @@ export const SocketProvider = ({ children }) => {
         setSocket(null);
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cleanup uses latest socket from state when auth toggles; adding socket would recreate connection every update
   }, [isAuthenticated]);
 
   // Join a project room

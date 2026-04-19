@@ -83,6 +83,67 @@ const projectSchema = new mongoose.Schema({
       timestamp: { type: Date, default: Date.now }
     }, { _id: false })
   ],
+  tasks: [
+    new mongoose.Schema({
+      title: {
+        type: String,
+        required: true,
+        trim: true,
+        maxlength: 160
+      },
+      status: {
+        type: String,
+        enum: ['todo', 'doing', 'done'],
+        default: 'todo'
+      },
+      priority: {
+        type: String,
+        enum: ['Low', 'Medium', 'High'],
+        default: 'Medium'
+      },
+      createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      createdAt: {
+        type: Date,
+        default: Date.now
+      },
+      updatedAt: {
+        type: Date,
+        default: Date.now
+      }
+    })
+  ],
+  snippets: [
+    new mongoose.Schema({
+      title: {
+        type: String,
+        required: true,
+        trim: true,
+        maxlength: 120
+      },
+      language: {
+        type: String,
+        trim: true,
+        default: 'javascript',
+        maxlength: 40
+      },
+      code: {
+        type: String,
+        required: true,
+        maxlength: 50000
+      },
+      createdBy: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User'
+      },
+      createdAt: {
+        type: Date,
+        default: Date.now
+      }
+    })
+  ],
   isPublic: {
     type: Boolean,
     default: false

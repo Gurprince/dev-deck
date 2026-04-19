@@ -42,7 +42,6 @@ export default defineConfig(({ mode }) => {
           manualChunks: {
             react: ['react', 'react-dom', 'react-router-dom'],
             monaco: ['@monaco-editor/react'],
-            ui: ['@headlessui/react', '@heroicons/react'],
           },
         },
       },

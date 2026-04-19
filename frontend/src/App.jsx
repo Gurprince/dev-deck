@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { ChatProvider } from './context/ChatContext';
@@ -6,9 +6,17 @@ import AppLayout from './components/layout/AppLayout';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import ProjectsPage from './pages/ProjectsPage';
-import EditorPage from './pages/EditorPage';
 import NotFoundPage from './pages/NotFoundPage';
 import './App.css';
+
+const EditorPage = lazy(() => import('./pages/EditorPage'));
+
+const EditorPageFallback = () => (
+  <div className="flex flex-col items-center justify-center min-h-[50vh] gap-3 text-slate-600 dark:text-slate-400">
+    <div className="h-10 w-10 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" aria-hidden />
+    <p className="text-sm font-medium">Loading editor…</p>
+  </div>
+);
 
 // Protected route component
 const ProtectedRoute = ({ children }) => {
@@ -42,7 +50,6 @@ const ProtectedRoute = ({ children }) => {
 const PublicRoute = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
   const [initialized, setInitialized] = useState(false);
-  const location = useLocation();
 
   useEffect(() => {
     if (!isLoading) {
@@ -59,6 +66,7 @@ const PublicRoute = ({ children }) => {
   }
 
   if (isAuthenticated) {
+    return <Navigate to="/projects" replace />;
   }
 
   return children;
@@ -67,7 +75,7 @@ const PublicRoute = ({ children }) => {
 const App = () => {
   return (
     <ChatProvider>
-      <div className="min-h-screen bg-gray-50 text-slate-100">
+      <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-[#111113] dark:text-slate-100">
         <Routes>
           {/* Public routes */}
           <Route path="/login" element={
@@ -89,8 +97,22 @@ const App = () => {
         }>
           <Route index element={<Navigate to="/projects" replace />} />
           <Route path="projects" element={<ProjectsPage />} />
-          <Route path="projects/new" element={<EditorPage />} />
-          <Route path="projects/:projectId" element={<EditorPage />} />
+          <Route
+            path="projects/new"
+            element={
+              <Suspense fallback={<EditorPageFallback />}>
+                <EditorPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="projects/:projectId"
+            element={
+              <Suspense fallback={<EditorPageFallback />}>
+                <EditorPage />
+              </Suspense>
+            }
+          />
         </Route>
         
         {/* 404 route */}

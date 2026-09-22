@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectsApi } from '../services/api';
@@ -7,6 +7,16 @@ import { useTheme } from '../context/ThemeContext';
 import CodePlayground from '../components/editor/CodePlayground';
 import EditorWorkspaceShell from '../components/workspace/EditorWorkspaceShell';
 import { getProjectTemplate } from '../constants/boilerplate';
+import {
+  createWorkspaceItem,
+  deleteWorkspaceItem,
+  getFileByPath,
+  getWorkspaceState,
+  inferLanguageFromPath,
+  normalizeWorkspacePath,
+  renameWorkspaceItem,
+  updateFileContent,
+} from '../utils/workspace';
 import { toast } from 'react-hot-toast';
 
 const EditorPage = () => {
@@ -14,14 +24,26 @@ const EditorPage = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const selectedTemplate = getProjectTemplate(searchParams.get('template'));
-  const starterCode = selectedTemplate.code;
-  const [chatOpen, setChatOpen] = useState(false);
-  const { joinProject, leaveProject, onCodeUpdate } = useSocket();
+  const { socket, joinProject, leaveProject } = useSocket();
   const { theme } = useTheme();
   const queryClient = useQueryClient();
   const [title, setTitle] = useState('Untitled Project');
+  const [chatOpen, setChatOpen] = useState(false);
+  const [workspaceFiles, setWorkspaceFiles] = useState([]);
+  const [entryFilePath, setEntryFilePath] = useState(selectedTemplate.entryFilePath || 'src/index.js');
+  const [activeFilePath, setActiveFilePath] = useState(selectedTemplate.entryFilePath || 'src/index.js');
+  const [openFilePaths, setOpenFilePaths] = useState([]);
 
-  // Fetch project data
+  const templateWorkspace = useMemo(
+    () =>
+      getWorkspaceState({
+        files: selectedTemplate.files,
+        entryFilePath: selectedTemplate.entryFilePath,
+        code: selectedTemplate.code,
+      }),
+    [selectedTemplate]
+  );
+
   const { data: project, isLoading, error } = useQuery({
     queryKey: ['projects', projectId],
     queryFn: async () => (await projectsApi.getById(projectId)).data,
@@ -34,7 +56,22 @@ const EditorPage = () => {
     },
   });
 
-  // Sync title when project data loads
+  useEffect(() => {
+    const sourceWorkspace =
+      projectId && projectId !== 'new' && project
+        ? getWorkspaceState({
+            files: project.files,
+            entryFilePath: project.entryFilePath,
+            code: project.code,
+          })
+        : templateWorkspace;
+
+    setWorkspaceFiles(sourceWorkspace.files);
+    setEntryFilePath(sourceWorkspace.entryFilePath);
+    setActiveFilePath(sourceWorkspace.entryFilePath);
+    setOpenFilePaths([sourceWorkspace.entryFilePath]);
+  }, [project, projectId, templateWorkspace]);
+
   useEffect(() => {
     if (project?.name) {
       setTitle(project.name);
@@ -43,19 +80,64 @@ const EditorPage = () => {
     }
   }, [project, projectId, selectedTemplate?.name]);
 
-  // Update mutation for saving project
+  useEffect(() => {
+    if (!projectId || projectId === 'new') return undefined;
+    joinProject(projectId);
+    return () => leaveProject(projectId);
+  }, [joinProject, leaveProject, projectId]);
+
+  useEffect(() => {
+    if (!socket || !projectId || projectId === 'new') return undefined;
+
+    const handleRemoteCodeUpdate = (data) => {
+      if (data && data.filePath && data.filePath !== activeFilePath && typeof data.code === 'string') {
+        setWorkspaceFiles((current) => updateFileContent(current, data.filePath, data.code));
+      }
+    };
+
+    socket.on('code-update', handleRemoteCodeUpdate);
+    return () => {
+      socket.off('code-update', handleRemoteCodeUpdate);
+    };
+  }, [socket, projectId, activeFilePath]);
+
+  const currentFile = getFileByPath(workspaceFiles, activeFilePath) || getFileByPath(workspaceFiles, entryFilePath);
+  const currentCode = currentFile?.content || '';
+  const currentLanguage = inferLanguageFromPath(currentFile?.path || entryFilePath);
+
+  const ensureOpenFile = (filePath) => {
+    setOpenFilePaths((current) => (current.includes(filePath) ? current : [...current, filePath]));
+  };
+
+  const openFile = (filePath) => {
+    const normalized = normalizeWorkspacePath(filePath);
+    if (!normalized) return;
+    setActiveFilePath(normalized);
+    ensureOpenFile(normalized);
+  };
+
+  const closeFile = (filePath) => {
+    setOpenFilePaths((current) => {
+      const next = current.filter((item) => item !== filePath);
+      if (activeFilePath === filePath) {
+        const fallback = next[next.length - 1] || entryFilePath;
+        setActiveFilePath(fallback);
+      }
+      return next.length ? next : [entryFilePath];
+    });
+  };
+
   const updateProjectMutation = useMutation({
     mutationFn: async ({ id, updates }) => (await projectsApi.update(id, updates)).data,
     onSuccess: () => {
       queryClient.invalidateQueries(['projects', projectId]);
       toast.success('Project saved successfully');
     },
-    onError: (error) => {
-      toast.error(error.message || 'Failed to save project');
+    onError: (mutationError) => {
+      toast.error(mutationError.message || 'Failed to save project');
     },
   });
 
-  // Create new project mutation
   const createProjectMutation = useMutation({
     mutationFn: async (projectData) => (await projectsApi.create(projectData)).data,
     onSuccess: (data) => {
@@ -63,78 +145,127 @@ const EditorPage = () => {
       navigate(`/projects/${data._id}`, { replace: true });
       toast.success('Project created successfully');
     },
-    onError: (error) => {
-      toast.error(error.message || 'Failed to create project');
+    onError: (mutationError) => {
+      toast.error(mutationError.message || 'Failed to create project');
     },
   });
 
-  // Handle real-time code updates
-  useEffect(() => {
-    if (!projectId || projectId === 'new') return;
-    
-    // Join project room for real-time collaboration
-    joinProject(projectId);
-    
-    // Handle incoming code updates
-    const cleanupCodeUpdate = onCodeUpdate((code) => {
-      if (code !== project?.code) {
-        // Update local state without saving to the server
-        queryClient.setQueryData(['projects', projectId], (oldData) => ({
-          ...oldData,
-          code,
-        }));
-      }
-    });
-    
-    // Cleanup on unmount
-    return () => {
-      cleanupCodeUpdate();
-      if (projectId && projectId !== 'new') {
-        leaveProject(projectId);
-      }
-    };
-  }, [projectId, project?.code, joinProject, leaveProject, onCodeUpdate, queryClient]);
-
-  // Handle saving the project
-  const handleSave = async (code) => {
+  const handleSave = async ({ files, entryFilePath: nextEntryFilePath, code }) => {
     try {
-      if (!projectId) {
-        // Create new project
+      const updates = {
+        name: title?.trim() || project?.name || 'Untitled Project',
+        code,
+        files,
+        entryFilePath: nextEntryFilePath,
+      };
+
+      if (!projectId || projectId === 'new') {
         await createProjectMutation.mutateAsync({
-          name: title?.trim() || 'Untitled Project',
+          ...updates,
           description: 'A new DevDeck project',
-          code,
           isPublic: false,
         });
       } else {
-        // Update existing project
         await updateProjectMutation.mutateAsync({
           id: projectId,
-          updates: { code, name: title?.trim() || project?.name || 'Untitled Project' },
+          updates,
         });
       }
       return true;
-    } catch (error) {
-      console.error('Error saving project:', error);
+    } catch (saveError) {
+      console.error('Error saving project:', saveError);
       return false;
     }
   };
 
-  // Handle project deletion
   const handleDeleteProject = async () => {
     if (!projectId || projectId === 'new' || !window.confirm('Are you sure you want to delete this project? This action cannot be undone.')) {
       return;
     }
-    
+
     try {
       await projectsApi.delete(projectId);
       queryClient.invalidateQueries(['projects']);
       toast.success('Project deleted successfully');
       navigate('/projects');
-    } catch (error) {
-      console.error('Error deleting project:', error);
-      toast.error(error.message || 'Failed to delete project');
+    } catch (deleteError) {
+      console.error('Error deleting project:', deleteError);
+      toast.error(deleteError.message || 'Failed to delete project');
     }
+  };
+
+  const handleCodeChange = (nextCode) => {
+    if (!currentFile?.path) return;
+    setWorkspaceFiles((current) => updateFileContent(current, currentFile.path, nextCode));
+  };
+
+  const handleCreateFile = (filePath) => {
+    if (!filePath) return;
+    const normalized = normalizeWorkspacePath(filePath);
+    if (!normalized) return;
+    setWorkspaceFiles((current) => createWorkspaceItem(current, normalized, 'file'));
+    openFile(normalized);
+  };
+
+  const handleCreateFolder = (folderPath) => {
+    if (!folderPath) return;
+    const normalized = normalizeWorkspacePath(folderPath);
+    if (!normalized) return;
+    setWorkspaceFiles((current) => createWorkspaceItem(current, normalized, 'folder'));
+  };
+
+  const handleRenameItem = (oldPath, nextPath) => {
+    if (!oldPath || !nextPath) return;
+    setWorkspaceFiles((current) => renameWorkspaceItem(current, oldPath, nextPath));
+
+    if (entryFilePath === oldPath || entryFilePath.startsWith(`${oldPath}/`)) {
+      const suffix = entryFilePath === oldPath ? '' : entryFilePath.slice(oldPath.length + 1);
+      setEntryFilePath(suffix ? `${nextPath}/${suffix}` : nextPath);
+    }
+
+    if (activeFilePath === oldPath || activeFilePath.startsWith(`${oldPath}/`)) {
+      const suffix = activeFilePath === oldPath ? '' : activeFilePath.slice(oldPath.length + 1);
+      setActiveFilePath(suffix ? `${nextPath}/${suffix}` : nextPath);
+    }
+
+    setOpenFilePaths((current) =>
+      current.map((item) =>
+        item === oldPath || item.startsWith(`${oldPath}/`)
+          ? `${nextPath}${item === oldPath ? '' : item.slice(oldPath.length)}`
+          : item
+      )
+    );
+  };
+
+  const handleDeleteItem = (targetPath) => {
+    if (!targetPath) return;
+    if (!window.confirm(`Delete ${targetPath}?`)) return;
+
+    const nextFiles = deleteWorkspaceItem(workspaceFiles, targetPath);
+    const fallbackFile = nextFiles.find((item) => item.type === 'file')?.path || '';
+    setWorkspaceFiles(nextFiles);
+
+    if (targetPath === entryFilePath || entryFilePath.startsWith(`${targetPath}/`)) {
+      setEntryFilePath(fallbackFile);
+    }
+
+    if (targetPath === activeFilePath || activeFilePath.startsWith(`${targetPath}/`)) {
+      setActiveFilePath(fallbackFile);
+    }
+
+    setOpenFilePaths((current) => {
+      const filtered = current.filter(
+        (item) => item !== targetPath && !item.startsWith(`${targetPath}/`)
+      );
+      return filtered.length ? filtered : fallbackFile ? [fallbackFile] : [];
+    });
+  };
+
+  const handleSetEntryFile = (filePath) => {
+    const file = getFileByPath(workspaceFiles, filePath);
+    if (!file) return;
+    setEntryFilePath(filePath);
+    openFile(filePath);
   };
 
   if (isLoading && projectId !== 'new') {
@@ -181,14 +312,31 @@ const EditorPage = () => {
         projectId={projectId}
         onBackToProjects={() => navigate('/projects')}
         onDeleteProject={projectId && projectId !== 'new' ? handleDeleteProject : undefined}
-          chatOpen={chatOpen}
-          onToggleChat={() => setChatOpen((c) => !c)}
-          surface={theme === 'dark' ? 'ide' : 'default'}
+        chatOpen={chatOpen}
+        onToggleChat={() => setChatOpen((current) => !current)}
+        surface={theme === 'dark' ? 'ide' : 'default'}
+        files={workspaceFiles}
+        activeFilePath={activeFilePath}
+        entryFilePath={entryFilePath}
+        onSetEntryFile={handleSetEntryFile}
+        onOpenFile={openFile}
+        onCreateFile={handleCreateFile}
+        onCreateFolder={handleCreateFolder}
+        onRenameItem={handleRenameItem}
+        onDeleteItem={handleDeleteItem}
       >
         <CodePlayground
-          initialCode={!projectId ? starterCode : (project?.code || '')}
+          initialCode={currentCode}
+          language={currentLanguage}
           projectId={projectId || undefined}
           onSave={handleSave}
+          onCodeChange={handleCodeChange}
+          activeFilePath={activeFilePath}
+          openFilePaths={openFilePaths}
+          workspaceFiles={workspaceFiles}
+          entryFilePath={entryFilePath}
+          onOpenFile={openFile}
+          onCloseFile={closeFile}
           chatOpen={chatOpen}
           onChatOpenChange={setChatOpen}
           surface={theme === 'dark' ? 'ide' : 'default'}

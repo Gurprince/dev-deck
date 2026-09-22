@@ -82,13 +82,14 @@ export const projectsApi = {
 
 // Code Execution API
 export const executionApi = {
-  parseCode: (code) => api.post('/parse', { code }),
-  executeCode: async (code, projectId) => {
+  parseCode: (payload) => api.post('/parse', typeof payload === 'string' ? { code: payload } : payload),
+  executeCode: async (payload, projectId) => {
     try {
-      const response = await api.post('/execute', { 
-        code, 
-        projectId: projectId || undefined 
-      });
+      const requestBody =
+        typeof payload === 'string'
+          ? { code: payload, projectId: projectId || undefined }
+          : { ...payload, projectId: payload.projectId || projectId || undefined };
+      const response = await api.post('/execute', requestBody);
       return response;
     } catch (error) {
       console.error('API Error:', error);

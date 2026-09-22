@@ -40,6 +40,7 @@ app.use('/api/execute', customRateLimit);
 // CORS configuration
 const allowedOrigins = [
   "http://localhost:5173",
+  "http://localhost:5174",
   "http://127.0.0.1:5173",
   "http://localhost:3000",
   "http://127.0.0.1:3000",
@@ -528,6 +529,27 @@ io.on("connection", (socket) => {
     } catch (error) {
       console.error('Error in chatMessage handler:', error);
     }
+  });
+
+  // Relay code updates to other collaborators in the room
+  socket.on('code-update', (data) => {
+    if (!data || !data.projectId) return;
+    const projectId = String(data.projectId);
+    socket.to(projectId).emit('code-update', data);
+  });
+
+  // Relay cursor position updates to other collaborators in the room
+  socket.on('cursor-update', (data) => {
+    if (!data || !data.projectId) return;
+    const projectId = String(data.projectId);
+    socket.to(projectId).emit('cursor-update', data);
+  });
+
+  // Relay comment updates to other collaborators in the room
+  socket.on('comment-update', (data) => {
+    if (!data || !data.projectId) return;
+    const projectId = String(data.projectId);
+    socket.to(projectId).emit('comment-update', data);
   });
 });
 

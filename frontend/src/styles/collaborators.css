@@ -41,6 +41,16 @@
   cursor: pointer;
 }
 
+.comment-decoration-glyph {
+  background: #38bdf8;
+  border-radius: 50%;
+  width: 8px !important;
+  height: 8px !important;
+  margin-left: 5px;
+  margin-top: 5px;
+  box-shadow: 0 0 8px #38bdf8;
+}
+
 @keyframes cursor-blink {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

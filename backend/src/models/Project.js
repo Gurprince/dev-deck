@@ -64,6 +64,37 @@ const projectSchema = new mongoose.Schema({
     type: String,
     default: '// Write your code here\n// This is a sample Express.js route\napp.get(\'/api/hello\', (req, res) => {\n  res.json({ message: \'Hello from DevDeck!\' });\n});'
   },
+  files: [
+    new mongoose.Schema({
+      path: {
+        type: String,
+        required: true,
+        trim: true,
+        maxlength: 240,
+      },
+      type: {
+        type: String,
+        enum: ['file', 'folder'],
+        default: 'file',
+      },
+      language: {
+        type: String,
+        trim: true,
+        default: 'javascript',
+        maxlength: 40,
+      },
+      content: {
+        type: String,
+        default: '',
+        maxlength: 500000,
+      },
+    }, { _id: false })
+  ],
+  entryFilePath: {
+    type: String,
+    trim: true,
+    default: 'src/index.js',
+  },
   endpoints: [{
     path: String,
     method: String,

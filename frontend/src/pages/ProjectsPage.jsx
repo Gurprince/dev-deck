@@ -21,6 +21,7 @@ import {
   EyeIcon,
   FunnelIcon,
   StarIcon,
+  ChevronDownIcon,
 } from '@heroicons/react/24/outline';
 import { projectTemplates } from '../constants/boilerplate';
 
@@ -193,111 +194,127 @@ const ProjectsPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-[#111113] dark:text-slate-100">
+    <div className="relative min-h-screen bg-slate-50 text-slate-900 dark:bg-[#0b0b0f] dark:text-slate-100 overflow-hidden">
+      {/* Dynamic Background Gradients */}
+      <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-sky-500/[0.04] rounded-full blur-3xl pointer-events-none dark:bg-sky-500/[0.03]" />
+      <div className="absolute top-40 right-1/4 w-[600px] h-[600px] bg-indigo-500/[0.04] rounded-full blur-3xl pointer-events-none dark:bg-indigo-500/[0.03]" />
+
       {/* Header */}
-      <div className="border-b border-slate-200 bg-white dark:border-[#2b2b30] dark:bg-[#18181b]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          <div className="md:flex md:items-start md:justify-between">
+      <div className="border-b border-slate-200/80 bg-white/70 backdrop-blur-md dark:border-[#202024]/60 dark:bg-[#111115]/80 relative overflow-hidden">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="md:flex md:items-center md:justify-between">
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">Dev Deck Workspace</p>
-              <h2 className="mt-1 text-3xl font-bold leading-8 text-slate-950 dark:text-white sm:text-4xl sm:truncate">
-                Projects
+              <p className="text-xs font-bold uppercase tracking-wider text-sky-500 dark:text-sky-400">Dev Deck Workspace</p>
+              <h2 className="mt-1 text-3xl font-extrabold leading-8 text-slate-950 dark:text-white sm:text-4xl tracking-tight">
+                Projects Dashboard
               </h2>
-              <p className="mt-2 max-w-2xl text-sm text-slate-600 dark:text-slate-400">
-                Plan, code, test, document, and collaborate from one focused developer workspace.
+              <p className="mt-2 max-w-2xl text-sm text-slate-500 dark:text-slate-400">
+                Plan, code, test, document, and collaborate from one unified, high-fidelity developer cockpit.
               </p>
             </div>
             <div className="mt-4 flex md:mt-0 md:ml-4">
               <Link
                 to="/projects/new"
-                className="inline-flex items-center rounded-md border border-transparent bg-sky-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2"
+                className="inline-flex items-center rounded-xl border border-transparent bg-gradient-to-r from-sky-500 to-indigo-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-500/20 hover:from-sky-600 hover:to-indigo-600 transition-all duration-300 hover:shadow-sky-500/35 hover:-translate-y-0.5 active:translate-y-0"
               >
-                <PlusIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
+                <PlusIcon className="-ml-1 mr-2 h-5 w-5 stroke-[2.5]" aria-hidden="true" />
                 New Project
               </Link>
             </div>
           </div>
 
-          <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {dashboardStats.map((stat) => {
               const Icon = stat.icon;
 
               return (
                 <div
                   key={stat.label}
-                  className="rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-[#2b2b30] dark:bg-[#1f1f23]"
+                  className="relative overflow-hidden rounded-xl border border-slate-200/60 bg-white/60 p-5 dark:border-[#2b2b30]/60 dark:bg-[#15151c]/60 backdrop-blur-sm shadow-sm transition-all duration-300 hover:shadow-md hover:border-sky-500/20 group"
                 >
+                  <div className="absolute -right-6 -bottom-6 h-16 w-16 rounded-full bg-sky-500/5 blur-lg group-hover:bg-sky-500/10 transition-all duration-300" />
                   <div className="flex items-center justify-between">
-                    <p className="text-sm text-slate-500 dark:text-slate-400">{stat.label}</p>
-                    <Icon className="h-5 w-5 text-sky-500" />
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">{stat.label}</p>
+                    <span className="rounded-lg bg-sky-500/10 p-2 text-sky-500 dark:bg-sky-500/15">
+                      <Icon className="h-5 w-5" />
+                    </span>
                   </div>
-                  <p className="mt-2 text-2xl font-semibold text-slate-950 dark:text-white">{stat.value}</p>
+                  <p className="mt-3 text-3xl font-extrabold text-slate-950 dark:text-white tracking-tight">{stat.value}</p>
                 </div>
               );
             })}
           </div>
           
           {/* Search bar */}
-          <div className="mt-6 grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_180px]">
+          <div className="mt-8 grid gap-4 lg:grid-cols-[minmax(0,1fr)_200px_200px_200px]">
             <div className="relative">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                <SearchIcon className="h-5 w-5 text-gray-400" aria-hidden="true" />
+              <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                <SearchIcon className="h-5 w-5 text-slate-400" aria-hidden="true" />
               </div>
               <input
                 type="text"
-                className="block w-full rounded-md border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm leading-5 text-slate-900 placeholder-slate-500 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-[#3c3c3c] dark:bg-[#111113] dark:text-white dark:placeholder-slate-500"
-                placeholder="Search projects..."
+                className="block w-full rounded-xl border border-slate-200 bg-white/70 py-3.5 pl-11 pr-4 text-sm text-slate-900 placeholder-slate-400 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/10 dark:border-[#202024]/80 dark:bg-[#15151a]/85 dark:text-white dark:placeholder-slate-500 transition-all duration-200 shadow-sm"
+                placeholder="Search projects by name or description..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
-            <label className="relative">
-              <FunnelIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <div className="relative">
+              <FunnelIcon className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-455" />
               <select
                 value={visibilityFilter}
                 onChange={(event) => setVisibilityFilter(event.target.value)}
-                className="block w-full rounded-md border border-slate-300 bg-white py-3 pl-9 pr-3 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-[#3c3c3c] dark:bg-[#111113] dark:text-white"
+                className="block w-full rounded-xl border border-slate-200 bg-white/70 py-3.5 pl-9 pr-8 text-sm text-slate-700 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/10 dark:border-[#202024]/80 dark:bg-[#15151a]/85 dark:text-slate-300 appearance-none shadow-sm cursor-pointer"
               >
-                <option value="all">All visibility</option>
-                <option value="private">Private only</option>
-                <option value="public">Public only</option>
+                <option value="all">All Visibility</option>
+                <option value="private">Private Only</option>
+                <option value="public">Public Only</option>
               </select>
-            </label>
-            <label>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+                <ChevronDownIcon className="h-4 w-4" />
+              </div>
+            </div>
+            <div className="relative">
               <select
                 value={activityFilter}
                 onChange={(event) => setActivityFilter(event.target.value)}
-                className="block w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-[#3c3c3c] dark:bg-[#111113] dark:text-white"
+                className="block w-full rounded-xl border border-slate-200 bg-white/70 py-3.5 pl-4 pr-8 text-sm text-slate-700 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/10 dark:border-[#202024]/80 dark:bg-[#15151a]/85 dark:text-slate-300 appearance-none shadow-sm cursor-pointer"
               >
-                <option value="all">All activity</option>
-                <option value="recent">Updated this week</option>
-                <option value="openTasks">Has open tasks</option>
-                <option value="snippets">Has snippets</option>
+                <option value="all">All Activity</option>
+                <option value="recent">Updated This Week</option>
+                <option value="openTasks">Has Open Tasks</option>
+                <option value="snippets">Has Snippets</option>
               </select>
-            </label>
-            <label>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+                <ChevronDownIcon className="h-4 w-4" />
+              </div>
+            </div>
+            <div className="relative">
               <select
                 value={sortBy}
                 onChange={(event) => setSortBy(event.target.value)}
-                className="block w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm text-slate-900 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500 dark:border-[#3c3c3c] dark:bg-[#111113] dark:text-white"
+                className="block w-full rounded-xl border border-slate-200 bg-white/70 py-3.5 pl-4 pr-8 text-sm text-slate-700 focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/10 dark:border-[#202024]/80 dark:bg-[#15151a]/85 dark:text-slate-300 appearance-none shadow-sm cursor-pointer"
               >
                 <option value="updated">Sort: Recent</option>
                 <option value="name">Sort: Name</option>
                 <option value="created">Sort: Created</option>
-                <option value="tasks">Sort: Open tasks</option>
+                <option value="tasks">Sort: Open Tasks</option>
               </select>
-            </label>
+              <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-400">
+                <ChevronDownIcon className="h-4 w-4" />
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
       {/* Main content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <section className="mb-8">
-          <div className="mb-4 flex flex-col gap-1">
-            <h3 className="text-lg font-semibold text-slate-950 dark:text-white">Start From A Template</h3>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 relative z-10">
+        <section className="mb-10">
+          <div className="mb-5 flex flex-col gap-1">
+            <h3 className="text-lg font-bold text-slate-950 dark:text-white tracking-tight">Start From A Template</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Pick a starter and Dev Deck will open the editor with matching boilerplate.
+              Pick a starter template, and Dev Deck will initialize your editor with matching boilerplate instantly.
             </p>
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -305,32 +322,31 @@ const ProjectsPage = () => {
               <Link
                 key={template.id}
                 to={`/projects/new?template=${template.id}`}
-                className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-500/50 hover:shadow-md dark:border-[#2b2b30] dark:bg-[#18181b]"
+                className="group relative rounded-xl border border-slate-200 bg-white p-5 shadow-sm transition-all duration-300 hover:border-sky-500/40 hover:shadow-md dark:border-[#2b2b30]/60 dark:bg-[#15151c]/50 backdrop-blur-sm overflow-hidden"
               >
-                <div className="flex items-center gap-3">
-                  <span className="rounded-md bg-sky-50 p-2 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300">
+                <div className="absolute inset-0 bg-gradient-to-br from-sky-500/0 to-indigo-500/0 group-hover:from-sky-500/[0.02] group-hover:to-indigo-500/[0.02] transition-all duration-300 pointer-events-none" />
+                <div className="relative z-10 flex items-center gap-3">
+                  <span className="rounded-xl bg-sky-500/10 p-2.5 text-sky-500 group-hover:scale-110 transition-transform duration-300">
                     <CodeBracketSquareIcon className="h-5 w-5" />
                   </span>
                   <div className="min-w-0">
-                    <p className="font-semibold text-slate-950 dark:text-white">{template.name}</p>
-                    <p className="text-xs text-slate-500 dark:text-slate-400">Use template</p>
+                    <p className="font-bold text-slate-950 dark:text-white truncate group-hover:text-sky-500 dark:group-hover:text-sky-400 transition-colors duration-200">{template.name}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Starter template</p>
                   </div>
                 </div>
-                <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">{template.description}</p>
+                <p className="relative z-10 mt-4 text-sm text-slate-600 dark:text-slate-300 leading-relaxed">{template.description}</p>
               </Link>
             ))}
           </div>
         </section>
 
         {pinnedProjects.length > 0 && (
-          <section className="mb-8">
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-950 dark:text-white">Pinned Projects</h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Your fastest path back into active work.</p>
-              </div>
+          <section className="mb-10">
+            <div className="mb-5">
+              <h3 className="text-lg font-bold text-slate-950 dark:text-white tracking-tight">Pinned Workspaces</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">Your quickest path back into active coding sessions.</p>
             </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
               {pinnedProjects.map((project) => {
                 const stats = getProjectWorkflowStats(project);
 
@@ -338,16 +354,17 @@ const ProjectsPage = () => {
                   <Link
                     key={project._id}
                     to={`/projects/${project._id}`}
-                    className="rounded-lg border border-sky-500/30 bg-sky-50 p-4 text-sky-900 transition hover:bg-sky-100 dark:bg-sky-950/20 dark:text-sky-100 dark:hover:bg-sky-950/30"
+                    className="relative group rounded-xl border border-sky-500/25 bg-sky-500/[0.02] p-5 text-sky-900 transition-all duration-300 hover:bg-sky-500/[0.06] hover:border-sky-500/50 hover:shadow-md dark:bg-sky-950/10 dark:text-sky-100 dark:hover:bg-sky-950/20"
                   >
-                    <div className="flex items-start justify-between gap-3">
+                    <div className="absolute inset-0 bg-gradient-to-br from-sky-500/0 to-indigo-500/0 group-hover:from-sky-500/[0.02] transition-all duration-300" />
+                    <div className="flex items-start justify-between gap-3 relative z-10">
                       <div className="min-w-0">
-                        <p className="truncate font-semibold">{project.name}</p>
+                        <p className="truncate font-bold text-slate-950 dark:text-white group-hover:text-sky-500 dark:group-hover:text-sky-400 transition-colors duration-200">{project.name}</p>
                         <p className="mt-1 text-xs text-sky-700 dark:text-sky-300">
-                          {stats.openTasks} open tasks - {stats.snippets} snippets
+                          {stats.openTasks} tasks · {stats.snippets} snippets
                         </p>
                       </div>
-                      <StarIcon className="h-5 w-5 shrink-0 fill-sky-400 text-sky-500" />
+                      <StarIcon className="h-5 w-5 shrink-0 fill-amber-400 text-amber-500 group-hover:scale-110 transition-transform duration-300" />
                     </div>
                   </Link>
                 );
@@ -356,35 +373,36 @@ const ProjectsPage = () => {
           </section>
         )}
 
-        <section className="mb-8">
-          <div className="mb-4 flex flex-col gap-1">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Dev Deck Implementation Priority</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Ordered from the most important developer workflow pieces to the platform features that can follow.
+        <section className="mb-10">
+          <div className="mb-5 flex flex-col gap-1">
+            <h3 className="text-lg font-bold text-slate-950 dark:text-white tracking-tight">Priority Framework Roadmap</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              DevDeck system milestones mapped out from foundational developer workflow steps to downstream integrations.
             </p>
           </div>
           <div className="grid gap-4 lg:grid-cols-3">
             {devDeckPriorities.map((group) => (
               <article
                 key={group.stage}
-                className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-[#2b2b30] dark:bg-[#18181b]"
+                className="relative overflow-hidden rounded-xl border border-slate-200 bg-white/60 p-5 shadow-sm dark:border-[#2b2b30]/60 dark:bg-[#15151c]/60 backdrop-blur-sm group transition-all duration-300 hover:border-sky-500/20"
               >
+                <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-sky-500 to-indigo-500 opacity-60 group-hover:opacity-100 transition-opacity duration-300" />
                 <div className="mb-4">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-sky-600 dark:text-sky-400">{group.stage}</p>
-                  <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">{group.summary}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-sky-600 dark:text-sky-400">{group.stage}</p>
+                  <p className="mt-1.5 text-sm font-semibold text-slate-700 dark:text-slate-300">{group.summary}</p>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-4 mt-6">
                   {group.items.map((item) => {
                     const Icon = item.icon;
 
                     return (
                       <div key={item.label} className="flex items-start gap-3">
-                        <span className="mt-0.5 rounded-md bg-sky-50 p-2 text-sky-600 dark:bg-sky-950/40 dark:text-sky-300">
+                        <span className="mt-0.5 rounded-lg bg-sky-500/10 p-2 text-sky-500 dark:bg-sky-500/15">
                           <Icon className="h-4 w-4" />
                         </span>
                         <div className="min-w-0">
-                          <p className="text-sm font-medium text-slate-950 dark:text-white">{item.label}</p>
-                          <p className="text-xs text-slate-500 dark:text-slate-400">{item.status}</p>
+                          <p className="text-sm font-semibold text-slate-905 dark:text-slate-100">{item.label}</p>
+                          <p className="text-[11px] text-slate-400 dark:text-slate-500">{item.status}</p>
                         </div>
                       </div>
                     );
@@ -396,9 +414,9 @@ const ProjectsPage = () => {
         </section>
 
         {filteredProjects.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-slate-300 bg-white p-10 text-center dark:border-[#3c3c3c] dark:bg-[#18181b]">
+          <div className="rounded-xl border border-dashed border-slate-300 bg-white/60 p-12 text-center dark:border-[#2b2b30] dark:bg-[#15151c]/60 backdrop-blur-sm">
             <svg
-              className="mx-auto h-12 w-12 text-gray-400"
+              className="mx-auto h-12 w-12 text-slate-405"
               fill="none"
               viewBox="0 0 24 24"
               stroke="currentColor"
@@ -411,16 +429,16 @@ const ProjectsPage = () => {
                 d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
               />
             </svg>
-            <h3 className="mt-2 text-sm font-medium text-slate-950 dark:text-white">No projects</h3>
-            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+            <h3 className="mt-4 text-base font-bold text-slate-950 dark:text-white">No projects found</h3>
+            <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
               {searchQuery
-                ? 'No projects match your search.'
-                : 'Get started by creating a new project.'}
+                ? 'No projects matching your search parameters.'
+                : 'Get started by creating your very first project workspace.'}
             </p>
             <div className="mt-6">
               <Link
                 to="/projects/new"
-                className="inline-flex items-center rounded-md border border-transparent bg-sky-600 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2"
+                className="inline-flex items-center rounded-xl border border-transparent bg-gradient-to-r from-sky-500 to-indigo-500 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-sky-500/20 hover:from-sky-600 hover:to-indigo-600 transition-all duration-300 hover:shadow-sky-500/35"
               >
                 <PlusIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
                 New Project
@@ -436,95 +454,96 @@ const ProjectsPage = () => {
               return (
                 <article
                   key={project._id}
-                  className="group overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md dark:border-[#2b2b30] dark:bg-[#18181b]"
+                  className="group relative overflow-hidden rounded-xl border border-slate-200/60 bg-white shadow-sm transition-all duration-300 hover:shadow-md hover:border-sky-500/35 hover:-translate-y-0.5 dark:border-[#2b2b30]/60 dark:bg-[#15151c]/60 backdrop-blur-sm flex flex-col justify-between"
                 >
-                <div className="px-4 py-5 sm:p-6">
-                  <div className="flex items-center justify-between">
-                    <h3 className="truncate text-lg font-semibold leading-6 text-slate-950 dark:text-white">
-                      {project.name}
-                    </h3>
-                    <div className="flex shrink-0 items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => togglePinnedProject(project._id)}
-                        className={`rounded-md p-1.5 transition ${
-                          isPinned
-                            ? 'text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-950/30'
-                            : 'text-slate-400 hover:bg-slate-100 hover:text-sky-600 dark:hover:bg-[#2d2d30]'
-                        }`}
-                        title={isPinned ? 'Unpin project' : 'Pin project'}
-                      >
-                        <StarIcon className={`h-5 w-5 ${isPinned ? 'fill-sky-400' : ''}`} />
-                      </button>
-                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        project.isPublic
-                          ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
-                          : 'bg-slate-100 text-slate-700 dark:bg-[#2d2d30] dark:text-slate-300'
-                      }`}>
-                        {project.isPublic ? <GlobeAltIcon className="mr-1 h-3.5 w-3.5" /> : <LockClosedIcon className="mr-1 h-3.5 w-3.5" />}
-                        {project.isPublic ? 'Public' : 'Private'}
-                      </span>
-                    </div>
-                  </div>
-                  <p className="mt-2 line-clamp-2 min-h-10 text-sm text-slate-500 dark:text-slate-400">
-                    {project.description || 'No description'}
-                  </p>
-                  <div className="mt-4 flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
-                    <CalendarDaysIcon className="h-4 w-4 text-sky-500" />
-                    <span>Updated {new Date(project.updatedAt).toLocaleDateString()}</span>
-                  </div>
-                  <div className="mt-4 grid grid-cols-3 gap-2">
-                    <div className="rounded-md bg-slate-50 p-2 dark:bg-[#111113]">
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Open tasks</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{workflow.openTasks}</p>
-                    </div>
-                    <div className="rounded-md bg-slate-50 p-2 dark:bg-[#111113]">
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Snippets</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{workflow.snippets}</p>
-                    </div>
-                    <div className="rounded-md bg-slate-50 p-2 dark:bg-[#111113]">
-                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Endpoints</p>
-                      <p className="mt-1 text-sm font-semibold text-slate-950 dark:text-white">{workflow.endpoints}</p>
-                    </div>
-                  </div>
-                  {workflow.totalTasks > 0 && (
-                    <div className="mt-4">
-                      <div className="mb-1 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
-                        <span>Task progress</span>
-                        <span>{workflow.doneTasks}/{workflow.totalTasks}</span>
-                      </div>
-                      <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-[#2d2d30]">
-                        <div className="h-full rounded-full bg-sky-500" style={{ width: `${workflow.progress}%` }} />
+                  <div className="p-6 flex-1">
+                    <div className="flex items-start justify-between gap-3">
+                      <h3 className="truncate text-lg font-bold text-slate-950 dark:text-white leading-6 group-hover:text-sky-500 dark:group-hover:text-sky-400 transition-colors duration-200">
+                        {project.name}
+                      </h3>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => togglePinnedProject(project._id)}
+                          className={`rounded-lg p-1.5 transition ${
+                            isPinned
+                              ? 'text-amber-500 hover:bg-amber-500/10'
+                              : 'text-slate-400 hover:bg-slate-100 hover:text-sky-600 dark:hover:bg-[#2d2d30] dark:text-slate-500'
+                          }`}
+                          title={isPinned ? 'Unpin project' : 'Pin project'}
+                        >
+                          <StarIcon className={`h-4.5 w-4.5 ${isPinned ? 'fill-amber-400 text-amber-500' : ''}`} />
+                        </button>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${
+                          project.isPublic
+                            ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400'
+                            : 'bg-slate-100 text-slate-600 dark:bg-[#2c2c35] dark:text-slate-400'
+                        }`}>
+                          {project.isPublic ? <GlobeAltIcon className="mr-1 h-3.5 w-3.5" /> : <LockClosedIcon className="mr-1 h-3.5 w-3.5" />}
+                          {project.isPublic ? 'Public' : 'Private'}
+                        </span>
                       </div>
                     </div>
-                  )}
-                </div>
-                <div className="border-t border-slate-200 px-4 py-4 dark:border-[#2b2b30] sm:px-6">
-                  <div className="flex flex-wrap gap-3">
+                    <p className="mt-3 line-clamp-2 min-h-10 text-sm text-slate-500 dark:text-slate-400 leading-relaxed font-normal">
+                      {project.description || 'No description provided.'}
+                    </p>
+                    <div className="mt-5 flex items-center gap-2 text-xs text-slate-400 dark:text-slate-505 font-semibold uppercase tracking-wider">
+                      <CalendarDaysIcon className="h-4 w-4 text-sky-500" />
+                      <span>Updated {new Date(project.updatedAt).toLocaleDateString()}</span>
+                    </div>
+
+                    <div className="mt-5 grid grid-cols-3 gap-2">
+                      <div className="rounded-lg bg-slate-50 p-2.5 dark:bg-[#0c0c0f]/50 border border-slate-100 dark:border-transparent">
+                        <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Tasks</p>
+                        <p className="mt-1 text-base font-extrabold text-slate-950 dark:text-white">{workflow.openTasks}</p>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 p-2.5 dark:bg-[#0c0c0f]/50 border border-slate-100 dark:border-transparent">
+                        <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Snippets</p>
+                        <p className="mt-1 text-base font-extrabold text-slate-955 dark:text-white">{workflow.snippets}</p>
+                      </div>
+                      <div className="rounded-lg bg-slate-50 p-2.5 dark:bg-[#0c0c0f]/50 border border-slate-100 dark:border-transparent">
+                        <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Endpoints</p>
+                        <p className="mt-1 text-base font-extrabold text-slate-955 dark:text-white">{workflow.endpoints}</p>
+                      </div>
+                    </div>
+
+                    {workflow.totalTasks > 0 && (
+                      <div className="mt-5">
+                        <div className="mb-1.5 flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-slate-400">
+                          <span>Task Progress</span>
+                          <span>{workflow.doneTasks}/{workflow.totalTasks}</span>
+                        </div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-100 dark:bg-[#26262b]">
+                          <div className="h-full rounded-full bg-gradient-to-r from-sky-400 to-indigo-505 transition-all duration-300" style={{ width: `${workflow.progress}%` }} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="border-t border-slate-200/60 dark:border-[#2b2b30]/60 px-6 py-4 bg-slate-50/50 dark:bg-[#15151c]/30 flex flex-wrap gap-2.5">
                     <Link
                       to={`/projects/${project._id}`}
-                      className="inline-flex items-center rounded-md border border-transparent bg-sky-100 px-3 py-2 text-sm font-medium leading-4 text-sky-700 hover:bg-sky-200 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 dark:bg-sky-950/50 dark:text-sky-200 dark:hover:bg-sky-900"
+                      className="inline-flex items-center rounded-lg border border-transparent bg-sky-500/10 px-3.5 py-2 text-xs font-bold text-sky-600 hover:bg-sky-500/15 dark:bg-sky-500/15 dark:text-sky-300 dark:hover:bg-sky-500/25 transition-all duration-200 active:scale-95 animate-pulse-slow"
                     >
-                      <PencilIcon className="-ml-0.5 mr-2 h-4 w-4" aria-hidden="true" />
+                      <PencilIcon className="-ml-0.5 mr-1.5 h-4 w-4" aria-hidden="true" />
                       Edit
                     </Link>
                     <Link
                       to={`/projects/${project._id}`}
-                      className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium leading-4 text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 dark:border-[#3c3c3c] dark:bg-[#1f1f23] dark:text-slate-200 dark:hover:bg-[#2d2d30]"
+                      className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-[#2b2b30]/60 dark:bg-[#202026] dark:text-slate-300 dark:hover:bg-[#282830] transition-all duration-200 active:scale-95 shadow-sm"
                     >
-                      <EyeIcon className="-ml-0.5 mr-2 h-4 w-4" aria-hidden="true" />
+                      <EyeIcon className="-ml-0.5 mr-1.5 h-4 w-4" aria-hidden="true" />
                       View
                     </Link>
                     <button
                       type="button"
                       onClick={() => setShowDeleteModal(project._id)}
-                      className="ml-auto inline-flex items-center rounded-md border border-transparent bg-red-100 px-3 py-2 text-sm font-medium leading-4 text-red-700 hover:bg-red-200 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 dark:bg-red-950/50 dark:text-red-200 dark:hover:bg-red-900"
+                      className="ml-auto inline-flex items-center rounded-lg border border-transparent bg-rose-500/10 px-3.5 py-2 text-xs font-bold text-rose-600 hover:bg-rose-500/15 dark:bg-rose-500/15 dark:text-rose-400 dark:hover:bg-rose-500/25 transition-all duration-200 active:scale-95"
                     >
-                      <TrashIcon className="-ml-0.5 mr-2 h-4 w-4" aria-hidden="true" />
+                      <TrashIcon className="-ml-0.5 mr-1.5 h-4 w-4" aria-hidden="true" />
                       Delete
                     </button>
                   </div>
-                </div>
                 </article>
               );
             })}
@@ -534,39 +553,37 @@ const ProjectsPage = () => {
 
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
-        <div className="fixed z-10 inset-0 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div className="fixed z-50 inset-0 overflow-y-auto" aria-labelledby="modal-title" role="dialog" aria-modal="true">
           <div className="flex items-end justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <div className="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" aria-hidden="true" onClick={() => setShowDeleteModal(null)}></div>
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" aria-hidden="true" onClick={() => setShowDeleteModal(null)}></div>
 
             <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
 
-            <div className="inline-block align-bottom bg-white dark:bg-gray-800 rounded-lg px-4 pt-5 pb-4 text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6">
+            <div className="inline-block align-bottom bg-white dark:bg-[#181820] rounded-2xl px-4 pt-5 pb-4 text-left overflow-hidden shadow-2xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full sm:p-6 border border-slate-200/80 dark:border-[#2b2b30]/80 animate-in zoom-in-95 duration-200">
               <div className="sm:flex sm:items-start">
-                <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-red-100 sm:mx-0 sm:h-10 sm:w-10">
-                  <svg className="h-6 w-6 text-red-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                  </svg>
+                <div className="mx-auto flex-shrink-0 flex items-center justify-center h-12 w-12 rounded-full bg-rose-500/10 sm:mx-0 sm:h-10 sm:w-10">
+                  <TrashIcon className="h-5 w-5 text-rose-500" aria-hidden="true" />
                 </div>
                 <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                  <h3 className="text-lg leading-6 font-medium text-gray-900 dark:text-white" id="modal-title">Delete project</h3>
+                  <h3 className="text-lg leading-6 font-bold text-slate-950 dark:text-white" id="modal-title">Delete project workspace</h3>
                   <div className="mt-2">
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                      Are you sure you want to delete this project? This action cannot be undone.
+                    <p className="text-sm text-slate-500 dark:text-slate-400">
+                      Are you sure you want to delete this project? All associated tasks, snippets, and workspaces will be permanently erased. This action cannot be undone.
                     </p>
                   </div>
                 </div>
               </div>
-              <div className="mt-5 sm:mt-4 sm:flex sm:flex-row-reverse">
+              <div className="mt-6 sm:mt-5 sm:flex sm:flex-row-reverse gap-2">
                 <button
                   type="button"
-                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-red-600 text-base font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 sm:ml-3 sm:w-auto sm:text-sm"
+                  className="w-full inline-flex justify-center rounded-xl border border-transparent shadow-sm px-4 py-2 bg-rose-600 text-sm font-semibold text-white hover:bg-rose-700 transition-all duration-200 active:scale-95"
                   onClick={() => handleDeleteProject(showDeleteModal)}
                 >
-                  Delete
+                  Delete Workspace
                 </button>
                 <button
                   type="button"
-                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 dark:border-gray-600 shadow-sm px-4 py-2 bg-white dark:bg-gray-700 text-base font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 sm:mt-0 sm:w-auto sm:text-sm"
+                  className="mt-3 w-full inline-flex justify-center rounded-xl border border-slate-200 dark:border-[#2b2b30]/80 shadow-sm px-4 py-2 bg-white dark:bg-[#202026] text-sm font-semibold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-[#282830] transition-all duration-200 active:scale-95 sm:mt-0"
                   onClick={() => setShowDeleteModal(null)}
                 >
                   Cancel

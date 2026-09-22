@@ -4,6 +4,12 @@ import mongoose from 'mongoose';
 import { body, validationResult } from 'express-validator';
 import Project from '../models/Project.js';
 import { authenticateToken } from '../middleware/auth.js';
+import {
+  createLegacyWorkspace,
+  getEntryFileContent,
+  normalizeWorkspaceFiles,
+  resolveEntryFilePath,
+} from '../utils/workspace.js';
 
 const router = express.Router();
 
@@ -43,6 +49,22 @@ const normalizeSnippets = (snippets = [], userId) =>
       createdBy: snippet.createdBy || userId,
       createdAt: snippet.createdAt || new Date()
     }));
+
+const applyWorkspaceToProject = (project, { files, entryFilePath, fallbackCode }) => {
+  const normalizedFiles = normalizeWorkspaceFiles(files, fallbackCode ?? project.code);
+  const resolvedEntryFilePath = resolveEntryFilePath(
+    entryFilePath,
+    normalizedFiles,
+    fallbackCode ?? project.code
+  );
+  const entryFile =
+    normalizedFiles.find((item) => item.type === 'file' && item.path === resolvedEntryFilePath) ||
+    null;
+
+  project.files = normalizedFiles;
+  project.entryFilePath = resolvedEntryFilePath;
+  project.code = entryFile?.content || '';
+};
 
 // Middleware to check project ownership or collaboration
 const checkProjectAccess = async (req, res, next) => {
@@ -92,9 +114,20 @@ router.post('/', authenticateToken, [
       return res.status(400).json({ errors: errors.array() });
     }
 
+    const workspace = req.body.files?.length
+      ? getEntryFileContent({
+          files: req.body.files,
+          entryFilePath: req.body.entryFilePath,
+          code: req.body.code,
+        })
+      : createLegacyWorkspace(req.body.code);
+
     const project = new Project({
       ...req.body,
-      owner: req.user.userId
+      owner: req.user.userId,
+      code: workspace.code,
+      files: workspace.files,
+      entryFilePath: workspace.entryFilePath,
     });
 
     await project.save();
@@ -168,6 +201,13 @@ router.put('/:id/snippets', authenticateToken, checkProjectAccess, async (req, r
 
 // Get a single project
 router.get('/:id', authenticateToken, checkProjectAccess, (req, res) => {
+  if (!Array.isArray(req.project.files) || req.project.files.length === 0) {
+    const workspace = createLegacyWorkspace(req.project.code);
+    req.project.files = workspace.files;
+    req.project.entryFilePath = workspace.entryFilePath;
+  } else if (!req.project.entryFilePath) {
+    req.project.entryFilePath = resolveEntryFilePath(req.project.entryFilePath, req.project.files, req.project.code);
+  }
   res.json(req.project);
 });
 
@@ -182,7 +222,7 @@ router.put('/:id', authenticateToken, checkProjectAccess, async (req, res, next)
 
     // Determine requested updates
     const updates = Object.keys(req.body);
-    const allowedUpdates = ['name', 'description', 'isPublic', 'code', 'endpoints'];
+    const allowedUpdates = ['name', 'description', 'isPublic', 'code', 'endpoints', 'files', 'entryFilePath'];
     const isValidOperation = updates.every(update => allowedUpdates.includes(update));
     if (!isValidOperation) {
       return res.status(400).json({ message: 'Invalid updates' });
@@ -200,7 +240,20 @@ router.put('/:id', authenticateToken, checkProjectAccess, async (req, res, next)
       return res.status(403).json({ message: 'Only the project owner can update this project' });
     }
 
-    updates.forEach(update => req.project[update] = req.body[update]);
+    updates.forEach((update) => {
+      if (!['files', 'entryFilePath'].includes(update)) {
+        req.project[update] = req.body[update];
+      }
+    });
+
+    if (updates.includes('files') || updates.includes('entryFilePath') || updates.includes('code')) {
+      applyWorkspaceToProject(req.project, {
+        files: req.body.files || req.project.files,
+        entryFilePath: req.body.entryFilePath || req.project.entryFilePath,
+        fallbackCode: req.body.code ?? req.project.code,
+      });
+    }
+
     await req.project.save();
     
     res.json(req.project);

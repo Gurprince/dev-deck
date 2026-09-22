@@ -8,6 +8,8 @@ import { formatDistanceToNow } from 'date-fns';
 import { toast } from 'react-hot-toast';
 
 const ChatPanel = ({ projectId, isOpen, onClose }) => {
+  // A valid projectId is a non-empty string that isn't the 'new' sentinel
+  const hasValidProject = !!projectId && projectId !== 'new';
   const [newMessage, setNewMessage] = useState('');
   const [_isLoading, setIsLoading] = useState(true);
   const { socket, sendChatMessage } = useSocket();
@@ -32,7 +34,7 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
 
   // Fetch chat history
   const fetchChatHistory = useCallback(async () => {
-    if (!projectId) return;
+    if (!hasValidProject) return;
     
     const projectIdStr = String(projectId);
     const cachedMessages = getMessages(projectIdStr);
@@ -80,7 +82,7 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [projectId, apiBase, getMessages, addMessage]);
+  }, [projectId, hasValidProject, apiBase, getMessages, addMessage]);
 
   useEffect(() => {
     if (isOpen) {
@@ -240,7 +242,7 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
   
   // Join project room
   const joinProject = useCallback(() => {
-    if (!socket || !projectId) return;
+    if (!socket || !hasValidProject) return;
     
     const projectIdStr = String(projectId);
     
@@ -251,19 +253,16 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
         userId: user?.id,
         username: user?.username || user?.email?.split('@')[0] || 'user'
       }, (response) => {
-        console.log('Join project response:', response);
+        if (response) console.log('Join project response:', response);
       });
     } else {
-      console.log('Socket not connected, cannot join project');
+      // no-op: socket not yet connected, the 'connect' listener will re-fire joinProject
     }
-  }, [socket, projectId, user?.id, user?.username, user?.email]);
+  }, [socket, hasValidProject, projectId, user?.id, user?.username, user?.email]);
 
   // Set up socket listeners
   useEffect(() => {
-    if (!socket || !projectId) {
-      console.log('Socket or projectId not available', { hasSocket: !!socket, projectId });
-      return;
-    }
+    if (!socket || !hasValidProject) return;
     
     const projectIdStr = String(projectId);
     
@@ -296,90 +295,119 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !projectId || !socket) return;
+
+    const trimmed = newMessage.trim();
+    if (!trimmed || !projectId) return;
+
+    const projectIdStr = String(projectId);
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const timestamp = new Date().toISOString();
+
+    // Create a temporary message for immediate UI feedback
+    const tempMessage = {
+      _id: tempId,
+      text: trimmed,
+      project: projectIdStr,
+      projectId: projectIdStr,
+      sender: {
+        _id: user?.id,
+        name: user?.name || user?.username || 'You',
+        email: user?.email || '',
+        username: user?.username || user?.email?.split('@')[0] || 'user',
+      },
+      senderId: user?.id,
+      senderName: user?.name || user?.username,
+      senderEmail: user?.email,
+      createdAt: timestamp,
+      timestamp: new Date(timestamp).getTime(),
+      isSending: true,
+      isTemporary: true,
+    };
+
+    // Clear input immediately so the UX feels responsive
+    setNewMessage('');
+
+    // Push the optimistic message into both context and local state
+    updateMessage(projectIdStr, tempId, tempMessage);
+    setMessages((prev) => {
+      const exists = prev.some((m) => m._id === tempId);
+      return exists ? prev : [...prev, tempMessage];
+    });
+
+    // Scroll to bottom
+    setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 50);
+
+    if (!socket || !socket.connected) {
+      // Mark message as failed if socket is unavailable
+      const failedMsg = { ...tempMessage, isSending: false, error: 'Not connected' };
+      updateMessage(projectIdStr, tempId, failedMsg);
+      setMessages((prev) => prev.map((m) => (m._id === tempId ? failedMsg : m)));
+      toast.error('Not connected to the server. Please wait and try again.');
+      return;
+    }
 
     try {
-      const projectIdStr = String(projectId);
-      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      const timestamp = new Date().toISOString();
-      
-      // Create a temporary message for immediate UI feedback
-      const tempMessage = {
-        _id: tempId,
-        text: newMessage,
-        project: projectIdStr,
-        projectId: projectIdStr,
-        sender: {
-          _id: user?.id,
-          name: user?.name || user?.username || 'You',
-          email: user?.email || '',
-          username: user?.username || user?.email?.split('@')[0] || 'user'
-        },
-        senderId: user?.id,
-        senderName: user?.name || user?.username,
-        senderEmail: user?.email,
-        createdAt: timestamp,
-        timestamp: new Date(timestamp).getTime(),
-        isSending: true,
-        isTemporary: true
-      };
-      
-      // Add the temporary message to the context and local state
-      updateMessage(projectIdStr, tempId, tempMessage);
-      
-      // Clear the input field
-      setNewMessage('');
-      
-      // Scroll to the bottom to show the new message
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      
-      // Prepare the message to send
       const messageToSend = {
-        _id: tempId, // Use the same ID as the temp message
-        text: newMessage,
+        _id: tempId,
+        text: trimmed,
         projectId: projectIdStr,
         sender: {
           _id: user?.id,
           name: user?.name || user?.username || 'You',
           email: user?.email || `${user?.id}@dev-deck.local`,
-          username: user?.username || user?.email?.split('@')[0] || 'user'
+          username: user?.username || user?.email?.split('@')[0] || 'user',
         },
         createdAt: timestamp,
-        timestamp: new Date(timestamp).getTime()
+        timestamp: new Date(timestamp).getTime(),
       };
-      
-      console.log('Sending chat message:', messageToSend);
-      
-      try {
-        // Send the message via WebSocket
-        sendChatMessage(messageToSend);
-      } catch (error) {
-        console.error('Error sending message:', error);
-        // Update the message to show it failed to send
-        updateMessage(projectIdStr, tempId, {
-          ...tempMessage,
-          isSending: false,
-          error: 'Failed to send message'
-        });
-        toast.error('Failed to send message');
-      }
+
+      sendChatMessage(messageToSend);
     } catch (error) {
-      console.error('Error in handleSendMessage:', error);
-      toast.error(error.message || 'An error occurred while sending the message');
+      console.error('Error sending message:', error);
+      const failedMsg = { ...tempMessage, isSending: false, error: 'Failed to send' };
+      updateMessage(projectIdStr, tempId, failedMsg);
+      setMessages((prev) => prev.map((m) => (m._id === tempId ? failedMsg : m)));
+      toast.error('Failed to send message. Please try again.');
     }
   };
 
   if (!isOpen) return null;
 
+  // No valid project yet — show a friendly placeholder
+  if (!hasValidProject) {
+    return (
+      <div className="fixed bottom-5 right-5 w-80 sm:w-[350px] bg-[#0c0c0f]/95 border border-[#2b2b30]/80 rounded-2xl shadow-2xl flex flex-col h-[480px] transition-all duration-300 ease-in-out overflow-hidden z-50 backdrop-blur-md">
+        <div className="bg-[#141418]/90 border-b border-[#2b2b30]/60 text-white p-3.5 flex justify-between items-center select-none">
+          <div className="relative flex items-center flex-1">
+            <ChatBubbleLeftRightIcon className="h-5 w-5 mr-2 text-sky-400" />
+            <span className="font-bold text-sm text-[#f4f4f5] tracking-wide">Project Chat</span>
+          </div>
+          <XMarkIcon
+            className="h-5 w-5 text-slate-400 hover:bg-[#202026] hover:text-[#f4f4f5] rounded-lg p-0.5 cursor-pointer transition-all duration-200"
+            onClick={() => onClose && onClose()}
+          />
+        </div>
+        <div className="flex flex-col items-center justify-center flex-1 text-center px-6 gap-3">
+          <ChatBubbleLeftRightIcon className="h-10 w-10 text-[#404048]" />
+          <p className="text-sm font-semibold text-[#a1a1aa]">Chat unavailable</p>
+          <p className="text-xs text-[#71717a] max-w-[220px] leading-relaxed">
+            Save your project first to enable live chat with collaborators.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`fixed bottom-4 right-4 w-80 bg-white rounded-lg shadow-xl flex flex-col ${isOpen ? 'h-96' : 'h-12'} transition-all duration-300 ease-in-out overflow-hidden z-50`}>
-      <div className="bg-blue-600 text-white p-3 flex justify-between items-center">
+    <div className={`fixed bottom-5 right-5 w-80 sm:w-[350px] bg-[#0c0c0f]/95 border border-[#2b2b30]/80 rounded-2xl shadow-2xl flex flex-col ${isOpen ? 'h-[480px]' : 'h-12'} transition-all duration-300 ease-in-out overflow-hidden z-50 backdrop-blur-md`}>
+      <div className="bg-[#141418]/90 border-b border-[#2b2b30]/60 text-white p-3.5 flex justify-between items-center select-none">
         <div 
-          className="flex items-center cursor-pointer flex-1"
+          className="relative flex items-center cursor-pointer flex-1"
           onClick={() => isOpen ? onClose() : (onClose && onClose())}
         >
-          <ChatBubbleLeftRightIcon className="h-5 w-5 mr-2" />
-          <span>Project Chat</span>
+          <span className="absolute -left-1 top-1.5 h-2 w-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_8px_#10b981]" />
+          <ChatBubbleLeftRightIcon className="h-5 w-5 ml-3.5 mr-2 text-sky-400" />
+          <span className="font-bold text-sm text-[#f4f4f5] tracking-wide">Project Chat</span>
         </div>
         {isOpen && (
           <button
@@ -388,7 +416,7 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
               clearChatHistory();
             }}
             disabled={isClearing || messages.length === 0}
-            className="p-1 rounded-full hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="p-1.5 rounded-lg text-slate-400 hover:bg-[#202026] hover:text-[#f4f4f5] disabled:opacity-30 disabled:cursor-not-allowed transition-all duration-200 mr-2"
             title="Clear chat history"
           >
             <TrashIcon className="h-4 w-4" />
@@ -396,7 +424,7 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
         )}
         {isOpen ? (
           <XMarkIcon 
-            className="h-5 w-5 hover:bg-blue-700 rounded p-0.5" 
+            className="h-5 w-5 text-slate-400 hover:bg-[#202026] hover:text-[#f4f4f5] rounded-lg p-0.5 cursor-pointer transition-all duration-200" 
             onClick={(e) => {
               e.stopPropagation();
               onClose && onClose();
@@ -411,19 +439,17 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
       
       {isOpen && (
         <>
-          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-[#2c2c35] [&::-webkit-scrollbar-thumb]:rounded-full">
             {messages.length === 0 ? (
-              <div className="text-center text-gray-500 mt-10">
-                No messages yet. Say hello! 👋
+              <div className="flex flex-col items-center justify-center text-center text-slate-500 mt-24 p-6 border border-dashed border-[#2b2b30]/65 rounded-xl mx-4 bg-[#141418]/30">
+                <ChatBubbleLeftRightIcon className="h-8 w-8 text-[#505058] mb-2.5" />
+                <p className="text-xs font-semibold text-[#a1a1aa]">No messages yet</p>
+                <p className="text-[10px] text-[#71717a] mt-1 max-w-[200px]">Send a live chat to other editors working in this workspace.</p>
               </div>
             ) : (
               messages.map((message) => {
                 // Helper function to extract sender information
                 const getSenderInfo = (msg, currentUserId) => {
-                  console.log('getSenderInfo - Message:', JSON.stringify(msg, null, 2));
-                  console.log('getSenderInfo - Current User ID:', currentUserId);
-                  
-                  // First, determine if this is the current user's message
                   const isCurrentUser = (
                     (msg.sender?._id && msg.sender._id === currentUserId) || 
                     (msg.senderId && msg.senderId === currentUserId) ||
@@ -431,89 +457,87 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
                     (msg.senderId === currentUserId)
                   );
                   
-                  // Start with default values
                   const sender = {
                     _id: msg.sender?._id || msg.senderId || 'unknown',
-                    name: 'User', // Default name
+                    name: 'User',
                     email: msg.sender?.email || msg.senderEmail || '',
                     username: msg.sender?.username || '',
                     isCurrentUser: isCurrentUser
                   };
 
-                  // If this is the current user, set name to 'You' and return early
                   if (isCurrentUser) {
                     sender.name = 'You';
                     return sender;
                   }
 
-                  // Try to get the best available name in order of preference
                   const possibleNames = [
-                    msg.sender?.name,      // Full name
-                    msg.sender?.username,  // Username
-                    msg.senderName,        // Legacy senderName
-                    msg.sender?.email?.split('@')[0]  // Email prefix
+                    msg.sender?.name,
+                    msg.sender?.username,
+                    msg.senderName,
+                    msg.sender?.email?.split('@')[0]
                   ].filter(Boolean);
 
-                  // Use the first valid name we find
                   if (possibleNames.length > 0) {
                     sender.name = possibleNames[0];
                   }
                   
-                  // Ensure we have the correct ID and email
                   sender._id = msg.sender?._id || msg.senderId || sender._id;
                   sender.email = msg.sender?.email || msg.senderEmail || sender.email;
                   
-                  // Log the final sender info for debugging
-                  console.log('Final sender info:', {
-                    messageId: msg._id,
-                    sender,
-                    isCurrentUser,
-                    currentUserId,
-                    senderId: msg.sender?._id || msg.senderId
-                  });
-
                   return sender;
                 };
 
-                // Get sender information
                 const currentUserId = user?.id?.toString();
                 const { _id: senderId, name: senderName, isCurrentUser } = getSenderInfo(message, currentUserId);
                 
-                // Debug information
-                console.log('Message debug:', {
-                  messageId: message._id,
-                  rawSender: message.sender,
-                  processedSender: { senderId, senderName, isCurrentUser },
-                  currentUserId,
-                  isCurrentUser
-                });
-                
+                const processedUser = {
+                  _id: senderId,
+                  name: senderName,
+                  email: message.sender?.email || message.senderEmail || '',
+                  username: message.sender?.username || '',
+                };
+
                 return (
                   <div 
                     key={message._id || message.id} 
-                    className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
+                    className={`flex items-start gap-2.5 ${isCurrentUser ? 'justify-end' : 'justify-start'}`}
                     data-message-id={message._id}
                     data-sender-id={senderId}
                     data-is-current-user={isCurrentUser}
                   >
+                    {!isCurrentUser && (
+                      <div className="shrink-0 mt-0.5">
+                        <UserAvatar user={processedUser} size="xs" showTooltip={true} showStatus={false} />
+                      </div>
+                    )}
                     <div 
-                      className={`max-w-xs p-3 rounded-lg ${
+                      className={`max-w-[75%] px-3.5 py-2.5 rounded-2xl ${
                         isCurrentUser 
-                          ? 'bg-blue-500 text-white' 
-                          : 'bg-gray-100 text-gray-800'
+                          ? 'bg-sky-500/20 text-[#f4f4f5] border border-sky-500/30 rounded-tr-none shadow-[0_2px_8px_rgba(14,165,233,0.05)]' 
+                          : 'bg-[#18181f]/90 text-[#e4e4e7] border border-[#2b2b30]/65 rounded-tl-none shadow-[0_2px_8px_rgba(0,0,0,0.2)]'
                       }`}
                     >
                       {!isCurrentUser && (
-                        <div className="font-semibold text-xs mb-1">
+                        <div className="font-bold text-[10px] text-sky-400 mb-1 tracking-wide">
                           {senderName}
                         </div>
                       )}
-                      <p className="text-sm whitespace-pre-wrap break-words">{message.text}</p>
+                      <p className="text-xs whitespace-pre-wrap break-words leading-relaxed">{message.text}</p>
                       <div 
-                        className={`text-xs mt-1 ${isCurrentUser ? 'text-blue-100' : 'text-gray-500'}`}
+                        className={`text-[9px] mt-1.5 font-semibold flex items-center gap-1 ${isCurrentUser ? 'text-sky-300/50' : 'text-slate-500'}`}
                         title={new Date(message.createdAt).toLocaleString()}
                       >
-                        {formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })}
+                        {message.error ? (
+                          <span className="text-rose-400 font-semibold">✕ Failed to send</span>
+                        ) : message.isSending ? (
+                          <span className="text-sky-400/60 flex items-center gap-0.5">
+                            <span className="inline-block w-1 h-1 rounded-full bg-sky-400/60 animate-bounce" style={{ animationDelay: '0ms' }} />
+                            <span className="inline-block w-1 h-1 rounded-full bg-sky-400/60 animate-bounce" style={{ animationDelay: '150ms' }} />
+                            <span className="inline-block w-1 h-1 rounded-full bg-sky-400/60 animate-bounce" style={{ animationDelay: '300ms' }} />
+                          </span>
+                        ) : (
+                          formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })
+                        )}
                       </div>
                     </div>
                   </div>
@@ -523,28 +547,29 @@ const ChatPanel = ({ projectId, isOpen, onClose }) => {
             <div ref={messagesEndRef} />
           </div>
           
-          <form onSubmit={handleSendMessage} className="p-3 border-t border-gray-200">
-            <div className="flex items-center">
+          <form onSubmit={handleSendMessage} className="p-3 border-t border-[#2b2b30]/65 bg-[#0f0f13]/98">
+            <div className="flex items-center gap-2">
               <input
                 type="text"
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 placeholder="Type a message..."
-                className="flex-1 border border-gray-300 rounded-l-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black"
+                className="flex-1 bg-[#131317] border border-[#2b2b30]/80 rounded-xl px-4 py-2 text-xs text-[#f4f4f5] placeholder-[#505058] focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500/20 transition-all duration-200"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
-                    handleSendMessage(e);
+                    // Submit the parent form to trigger handleSendMessage
+                    e.target.closest('form')?.requestSubmit();
                   }
                 }}
               />
               <button
                 type="submit"
-                className="bg-blue-600 text-white p-2 rounded-r-lg hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
+                className="bg-[#0ea5e9] hover:bg-[#0284c7] text-white p-2 rounded-xl transition-all duration-200 hover:scale-105 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed shadow-md shadow-sky-500/10 shrink-0"
                 disabled={!newMessage.trim()}
                 title="Send message"
               >
-                <PaperAirplaneIcon className="h-5 w-5" />
+                <PaperAirplaneIcon className="h-4 w-4" />
               </button>
             </div>
           </form>

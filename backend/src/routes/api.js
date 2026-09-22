@@ -12,6 +12,11 @@ import {
   ensureExecutionTemplate,
   linkOrCopyDependencies,
 } from '../services/executionEnvCache.js';
+import {
+  createLegacyWorkspace,
+  getEntryFileContent,
+  getWorkspaceCodeBundle,
+} from '../utils/workspace.js';
 
 const router = express.Router();
 const __filename = fileURLToPath(import.meta.url);
@@ -21,13 +26,14 @@ const __dirname = path.dirname(__filename);
 router.post('/parse', authenticateToken, async (req, res, next) => {
   try {
     const socketIO = (req.app && typeof req.app.get === 'function') ? req.app.get('io') : null;
-    const { code } = req.body;
-    
-    if (!code) {
-      return res.status(400).json({ message: 'Code is required' });
+    const { code, files, entryFilePath } = req.body;
+
+    if (!code && (!Array.isArray(files) || files.length === 0)) {
+      return res.status(400).json({ message: 'Code or files are required' });
     }
 
-    const endpoints = parseCodeForEndpoints(code);
+    const workspace = getWorkspaceCodeBundle({ files, entryFilePath, code });
+    const endpoints = parseCodeForEndpoints(workspace.bundle || workspace.code);
     res.json({ endpoints });
   } catch (error) {
     next(error);
@@ -40,7 +46,12 @@ router.get('/openapi/:projectId', authenticateToken, async (req, res, next) => {
     const { projectId } = req.params;
     const project = await Project.findById(projectId);
     if (!project) return res.status(404).json({ message: 'Project not found' });
-    const endpoints = parseCodeForEndpoints(project.code || '');
+    const workspace = getWorkspaceCodeBundle({
+      files: project.files,
+      entryFilePath: project.entryFilePath,
+      code: project.code,
+    });
+    const endpoints = parseCodeForEndpoints(workspace.bundle || workspace.code);
     const spec = generateOpenAPISpec(endpoints);
     res.json(spec);
   } catch (error) {
@@ -51,9 +62,12 @@ router.get('/openapi/:projectId', authenticateToken, async (req, res, next) => {
 // Generate OpenAPI spec from provided code (no need to save first)
 router.post('/openapi', authenticateToken, async (req, res, next) => {
   try {
-    const { code } = req.body;
-    if (!code) return res.status(400).json({ message: 'Code is required' });
-    const endpoints = parseCodeForEndpoints(code);
+    const { code, files, entryFilePath } = req.body;
+    if (!code && (!Array.isArray(files) || files.length === 0)) {
+      return res.status(400).json({ message: 'Code or files are required' });
+    }
+    const workspace = getWorkspaceCodeBundle({ files, entryFilePath, code });
+    const endpoints = parseCodeForEndpoints(workspace.bundle || workspace.code);
     const spec = generateOpenAPISpec(endpoints);
     res.json(spec);
   } catch (error) {
@@ -64,11 +78,11 @@ router.post('/openapi', authenticateToken, async (req, res, next) => {
 // Execute code and get output
 router.post('/execute', authenticateToken, async (req, res, next) => {
   console.log('Execute request body:', req.body);
-  const { code, projectId } = req.body;
+  const { code, projectId, files, entryFilePath } = req.body;
   const socketIO = (req.app && typeof req.app.get === 'function') ? req.app.get('io') : null;
-  
-  if (!code) {
-    return res.status(400).json({ message: 'Code is required' });
+
+  if (!code && (!Array.isArray(files) || files.length === 0)) {
+    return res.status(400).json({ message: 'Code or files are required' });
   }
 
   try {
@@ -89,13 +103,25 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
     console.error('Failed to create temp dir:', mkErr);
     return res.status(500).json({ message: mkErr.message || 'Failed to create temp directory' });
   }
-  const tempFilePath = path.join(tempDirPath, 'index.js');
-  
+  const workspace = Array.isArray(files) && files.length > 0
+    ? getEntryFileContent({ files, entryFilePath, code })
+    : createLegacyWorkspace(code);
+
   try {
     const runStarted = Date.now();
 
     linkOrCopyDependencies(tempDirPath);
-    fs.writeFileSync(tempFilePath, code);
+    workspace.files.forEach((item) => {
+      const targetPath = path.join(tempDirPath, item.path);
+      if (item.type === 'folder') {
+        fs.mkdirSync(targetPath, { recursive: true });
+        return;
+      }
+
+      fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+      fs.writeFileSync(targetPath, item.content || '');
+    });
+    const tempFilePath = path.join(tempDirPath, workspace.entryFilePath);
 
     // Always bind via ephemeral port (0). Reusing project.runPort caused EADDRINUSE when the
     // previous run was still listening or another process held that port. User code should use
@@ -107,7 +133,7 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
     let stderr = '';
     let timedOut = false;
     await new Promise((resolve, reject) => {
-      const child = exec('node index.js', {
+      const child = exec(`node "${workspace.entryFilePath}"`, {
         cwd: tempDirPath,
         env: { ...process.env, PORT: String(bindPort) },
       });
@@ -123,7 +149,7 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
 
       const timer = setTimeout(() => {
         timedOut = true;
-        try { child.kill('SIGKILL'); } catch {}
+        try { child.kill('SIGKILL'); } catch { }
         // Resolve after killing the long-running process, treating as successful run with captured logs
         resolve(null);
       }, 60000);
@@ -139,7 +165,7 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
               await Project.findByIdAndUpdate(projectId, { runPort: port });
             }
           }
-        } catch {}
+        } catch { }
         resolve(null);
       });
       child.on('error', (err) => {
@@ -157,7 +183,7 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
       let retryStdout = '';
       let retryStderr = '';
       await new Promise((resolve) => {
-        const child = exec('node index.js', {
+        const child = exec(`node "${workspace.entryFilePath}"`, {
           cwd: tempDirPath,
           env: { ...process.env, PORT: '0' },
         });
@@ -176,7 +202,7 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
               const port = match ? Number(match[1]) : null;
               if (port) await Project.findByIdAndUpdate(projectId, { runPort: port });
             }
-          } catch {}
+          } catch { }
           stdout += retryStdout;
           stderr += retryStderr;
           resolve(null);
@@ -188,13 +214,13 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
     try {
       fs.rmSync(tempDirPath, { recursive: true, force: true });
     } catch (e) {
-      setTimeout(() => { try { fs.rmSync(tempDirPath, { recursive: true, force: true }); } catch {} }, 2000);
+      setTimeout(() => { try { fs.rmSync(tempDirPath, { recursive: true, force: true }); } catch { } }, 2000);
     }
 
     // Save execution log if projectId is provided
     if (projectId) {
       await Project.findByIdAndUpdate(projectId, {
-        $push: { 
+        $push: {
           logs: {
             type: 'execution',
             output: stdout || stderr,
@@ -204,7 +230,7 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
       });
     }
 
-    res.json({ 
+    res.json({
       success: true,
       output: stdout || stderr,
       stderr: stderr || '',
@@ -218,48 +244,98 @@ router.post('/execute', authenticateToken, async (req, res, next) => {
         fs.rmSync(tempDirPath, { recursive: true, force: true });
       }
     } catch (e) {
-      setTimeout(() => { try { fs.rmSync(tempDirPath, { recursive: true, force: true }); } catch {} }, 2000);
+      setTimeout(() => { try { fs.rmSync(tempDirPath, { recursive: true, force: true }); } catch { } }, 2000);
     }
-    
+
     // Handle execution error
     console.error('Execution error:', error);
-    res.status(400).json({ 
+    res.status(400).json({
       success: false,
       error: 'Execution failed',
       message: error.message,
-      stderr: error.stderr || error.message
+      stderr: error.stderr || error.message,
     });
   }
 });
 
-// Test an API endpoint
-router.post('/test-endpoint', authenticateToken, async (req, res, next) => {
+// Test an API endpoint — proxies requests from the browser so that
+// localhost servers and CORS restrictions are handled server-side.
+router.post('/test-endpoint', authenticateToken, async (req, res) => {
+  const { url, method = 'GET', headers = {}, body = null } = req.body;
+
+  if (!url) {
+    return res.status(400).json({ message: 'URL is required' });
+  }
+
+  // Validate URL — only http/https to avoid SSRF via file:// etc.
+  let parsedUrl;
   try {
-    const { url, method = 'GET', headers = {}, body = null } = req.body;
-    
-    if (!url) {
-      return res.status(400).json({ message: 'URL is required' });
+    parsedUrl = new URL(url);
+  } catch {
+    return res.status(400).json({ message: 'Invalid URL format' });
+  }
+  if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+    return res.status(400).json({ message: 'Only http and https URLs are allowed' });
+  }
+
+  try {
+    const fetchOptions = {
+      method: method.toUpperCase(),
+      headers: { 'Content-Type': 'application/json', ...headers },
+      signal: AbortSignal.timeout(15_000),
+    };
+    if (body && !['GET', 'HEAD'].includes(method.toUpperCase())) {
+      fetchOptions.body = JSON.stringify(body);
     }
 
-    const response = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers
-      },
-      body: body ? JSON.stringify(body) : undefined
-    });
+    const response = await fetch(url, fetchOptions);
 
-    const responseData = await response.json().catch(() => ({}));
-    
-    res.json({
+    let responseData;
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      responseData = await response.json().catch(() => ({}));
+    } else {
+      const text = await response.text().catch(() => '');
+      try { responseData = JSON.parse(text); } catch { responseData = text; }
+    }
+
+    return res.json({
       status: response.status,
       statusText: response.statusText,
       headers: Object.fromEntries(response.headers.entries()),
-      data: responseData
+      data: responseData,
     });
   } catch (error) {
-    next(error);
+    const cause = error?.cause || error;
+    const code = cause?.code || '';
+
+    if (code === 'ECONNREFUSED') {
+      return res.status(503).json({
+        error: 'connection_refused',
+        message: `Could not connect to ${parsedUrl.host}. Make sure your project server is running by clicking Run first.`,
+        url,
+      });
+    }
+    if (code === 'ENOTFOUND') {
+      return res.status(503).json({
+        error: 'host_not_found',
+        message: `Host "${parsedUrl.hostname}" could not be resolved. Check the base URL.`,
+        url,
+      });
+    }
+    if (error.name === 'TimeoutError' || code === 'ETIMEDOUT' || code === 'UND_ERR_CONNECT_TIMEOUT') {
+      return res.status(504).json({ error: 'timeout', message: `Request to ${url} timed out after 15 seconds.`, url });
+    }
+    if (error.name === 'AbortError') {
+      return res.status(499).json({ error: 'aborted', message: 'Request was aborted.', url });
+    }
+
+    console.error('[test-endpoint] Unexpected error:', error);
+    return res.status(500).json({
+      error: 'request_failed',
+      message: error.message || 'An unexpected error occurred.',
+      url,
+    });
   }
 });
 
@@ -268,7 +344,7 @@ router.post('/:projectId/endpoints', authenticateToken, async (req, res, next) =
   try {
     const { endpoints } = req.body;
     const { projectId } = req.params;
-    
+
     if (!endpoints || !Array.isArray(endpoints)) {
       return res.status(400).json({ message: 'Endpoints array is required' });
     }
@@ -277,8 +353,8 @@ router.post('/:projectId/endpoints', authenticateToken, async (req, res, next) =
       _id: projectId,
       $or: [
         { owner: req.user.userId },
-        { 'collaborators.user': req.user.userId, 'collaborators.role': { $in: ['admin', 'editor'] } }
-      ]
+        { 'collaborators.user': req.user.userId, 'collaborators.role': { $in: ['admin', 'editor'] } },
+      ],
     });
 
     if (!project) {
@@ -287,7 +363,6 @@ router.post('/:projectId/endpoints', authenticateToken, async (req, res, next) =
 
     project.endpoints = endpoints;
     await project.save();
-    
     res.json(project);
   } catch (error) {
     next(error);
@@ -320,15 +395,15 @@ router.post('/stop-execution', authenticateToken, (req, res) => {
 router.get('/execution-status/:executionId', authenticateToken, (req, res) => {
   const { executionId } = req.params;
   const server = runningServers.get(executionId);
-  
+
   if (!server) {
-    return res.status(404).json({ 
+    return res.status(404).json({
       isRunning: false,
-      message: 'No running server found with this ID' 
+      message: 'No running server found with this ID'
     });
   }
 
-  res.json({ 
+  res.json({
     isRunning: true,
     port: server.port,
     pid: server.pid

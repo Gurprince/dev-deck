@@ -33,21 +33,21 @@ const EditorToolbar = ({
     );
   }
 
-  const buttonClasses = `inline-flex min-h-8 items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 ${
-    ide
-      ? 'text-[#e4e4e7] bg-[#2d2d30] hover:bg-[#3c3c3c] focus:ring-[#38bdf8] focus:ring-offset-0'
-      : theme === 'dark'
-        ? 'text-white bg-slate-700 hover:bg-slate-600 focus:ring-sky-500'
-        : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50 focus:ring-sky-500'
-  } disabled:opacity-50 disabled:cursor-not-allowed`;
+  const baseButtonClasses = `inline-flex min-h-8.5 items-center px-3.5 py-1.5 border border-transparent text-xs font-semibold rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-200 active:scale-97 disabled:opacity-50 disabled:cursor-not-allowed`;
 
-  const iconClasses = 'h-4 w-4 mr-1.5';
+  const defaultColorClasses = ide
+    ? 'text-[#c0c0c8] bg-[#1e1e24] hover:bg-[#282830] hover:text-white border-[#202024]/60 focus:ring-[#38bdf8] focus:ring-offset-0'
+    : theme === 'dark'
+      ? 'text-white bg-slate-700 hover:bg-slate-600 focus:ring-sky-500'
+      : 'text-gray-700 bg-white border-gray-300 hover:bg-gray-50 focus:ring-sky-500';
+
+  const iconClasses = 'h-4 w-4 mr-1.5 transition-transform duration-200 group-hover:scale-105';
 
   return (
     <div
-      className={`flex items-center justify-between p-2 border-b ${
+      className={`flex items-center justify-between p-2.5 border-b ${
         ide
-        ? 'border-[#2b2b30] bg-[#18181b]'
+        ? 'border-[#202024]/85 bg-[#0f0f13]'
           : theme === 'dark'
             ? 'border-gray-700 bg-gray-800'
             : 'border-gray-200 bg-gray-50'
@@ -58,18 +58,18 @@ const EditorToolbar = ({
           type="button"
           onClick={onRun}
           disabled={isRunning}
-          className={`${buttonClasses} ${isRunning ? 'opacity-50 cursor-not-allowed' : ''}`}
+          className={`${baseButtonClasses} group ${isRunning ? 'opacity-50 cursor-not-allowed' : ''} text-emerald-400 border border-emerald-500/20 bg-emerald-500/10 hover:bg-emerald-500/18`}
           aria-label="Run code"
           title="Run code"
         >
-          <PlayIcon className={`${iconClasses} ${isRunning ? 'text-green-400' : ''}`} />
+          <PlayIcon className={`${iconClasses} ${isRunning ? 'text-emerald-300 animate-pulse' : 'text-emerald-400'}`} />
           {isRunning ? 'Running...' : 'Run'}
         </button>
         
         <button
           type="button"
           onClick={onFormat}
-          className={buttonClasses}
+          className={`${baseButtonClasses} ${defaultColorClasses} group`}
           aria-label="Format code"
           title="Format code"
         >
@@ -80,7 +80,7 @@ const EditorToolbar = ({
         <button
           type="button"
           onClick={onReset}
-          className={`${buttonClasses} ${!ide && theme === 'dark' ? 'hover:bg-gray-600' : ''} ${!ide && theme !== 'dark' ? 'hover:bg-gray-100' : ''}`}
+          className={`${baseButtonClasses} ${defaultColorClasses} group ${!ide && theme === 'dark' ? 'hover:bg-gray-600' : ''} ${!ide && theme !== 'dark' ? 'hover:bg-gray-100' : ''}`}
           aria-label="Reset code"
           title="Reset code"
         >
@@ -96,12 +96,10 @@ const EditorToolbar = ({
           type="button"
           onClick={onSave}
           disabled={!canSave || isSaving}
-          className={`${buttonClasses} ${
+          className={`${baseButtonClasses} group ${
             ide
-              ? '!bg-[#0ea5e9] hover:!bg-[#0284c7] focus:ring-[#38bdf8] text-white'
-              : theme === 'dark'
-                ? 'bg-sky-600 hover:bg-sky-700 focus:ring-sky-500'
-                : 'bg-sky-600 hover:bg-sky-700 focus:ring-sky-500 text-white'
+              ? 'bg-gradient-to-r from-sky-500 to-indigo-500 hover:from-sky-600 hover:to-indigo-600 focus:ring-[#38bdf8] text-white shadow-md shadow-sky-500/10'
+              : 'bg-sky-600 hover:bg-sky-700 focus:ring-sky-500 text-white'
           }`}
           aria-label="Save changes"
           title="Save changes"

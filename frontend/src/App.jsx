@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
 import { ChatProvider } from './context/ChatContext';
@@ -18,24 +18,29 @@ const EditorPageFallback = () => (
   </div>
 );
 
+const RouteLoading = () => (
+  <div className="flex items-center justify-center h-screen">
+    <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+  </div>
+);
+
+const RootRoute = () => {
+  const { isAuthenticated, loading } = useAuth();
+
+  if (loading) {
+    return <RouteLoading />;
+  }
+
+  return <Navigate to={isAuthenticated ? '/projects' : '/login'} replace />;
+};
+
 // Protected route component
 const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
   const location = useLocation();
-  const [initialized, setInitialized] = useState(false);
 
-  useEffect(() => {
-    if (!isLoading) {
-      setInitialized(true);
-    }
-  }, [isLoading]);
-
-  if (isLoading || !initialized) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
+  if (loading) {
+    return <RouteLoading />;
   }
 
   if (!isAuthenticated) {
@@ -48,21 +53,10 @@ const ProtectedRoute = ({ children }) => {
 
 // Public route component
 const PublicRoute = ({ children }) => {
-  const { isAuthenticated, isLoading } = useAuth();
-  const [initialized, setInitialized] = useState(false);
+  const { isAuthenticated, loading } = useAuth();
 
-  useEffect(() => {
-    if (!isLoading) {
-      setInitialized(true);
-    }
-  }, [isLoading]);
-
-  if (isLoading || !initialized) {
-    return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
+  if (loading) {
+    return <RouteLoading />;
   }
 
   if (isAuthenticated) {
@@ -77,6 +71,7 @@ const App = () => {
     <ChatProvider>
       <div className="min-h-screen bg-slate-50 text-slate-900 dark:bg-[#111113] dark:text-slate-100">
         <Routes>
+          <Route path="/" element={<RootRoute />} />
           {/* Public routes */}
           <Route path="/login" element={
             <PublicRoute>
@@ -90,15 +85,14 @@ const App = () => {
         } />
         
         {/* Protected routes */}
-        <Route path="/" element={
+        <Route path="/projects" element={
           <ProtectedRoute>
             <AppLayout />
           </ProtectedRoute>
         }>
-          <Route index element={<Navigate to="/projects" replace />} />
-          <Route path="projects" element={<ProjectsPage />} />
+          <Route index element={<ProjectsPage />} />
           <Route
-            path="projects/new"
+            path="new"
             element={
               <Suspense fallback={<EditorPageFallback />}>
                 <EditorPage />
@@ -106,7 +100,7 @@ const App = () => {
             }
           />
           <Route
-            path="projects/:projectId"
+            path=":projectId"
             element={
               <Suspense fallback={<EditorPageFallback />}>
                 <EditorPage />

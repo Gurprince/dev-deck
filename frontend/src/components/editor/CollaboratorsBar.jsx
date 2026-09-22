@@ -1,243 +1,139 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { UserPlusIcon } from '@heroicons/react/24/outline';
-import { useSocket } from '../../context/SocketContext';
-import UserAvatar from '../common/UserAvatar';
-import { projectsApi } from '../../services/api';
 import { toast } from 'react-hot-toast';
+import { useSocket } from '../../context/SocketContext';
+import { projectsApi } from '../../services/api';
+import UserAvatar from '../common/UserAvatar';
 
-// Function to generate consistent colors from strings
 const stringToColor = (str) => {
-  if (!str) return '#6366F1'; // Default indigo color
-  
+  if (!str) return '#38bdf8';
+
   let hash = 0;
-  for (let i = 0; i < str.length; i++) {
+  for (let i = 0; i < str.length; i += 1) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
-  
-  const colors = [
-    '#F87171', // red
-    '#FB923C', // orange
-    '#FBBF24', // amber
-    '#34D399', // emerald
-    '#60A5FA', // blue
-    '#818CF8', // indigo
-    '#A78BFA', // violet
-    '#F472B6', // pink
-  ];
-  
-  // Use the hash to pick a color
+
+  const colors = ['#f97316', '#f59e0b', '#22c55e', '#38bdf8', '#818cf8', '#e879f9'];
   return colors[Math.abs(hash) % colors.length];
+};
+
+const RoleSelect = ({ value, onChange }) => (
+  <div>
+    <label htmlFor="invite-role" className="mb-1 block text-xs font-medium uppercase tracking-[0.2em] text-slate-400">
+      Role
+    </label>
+    <select
+      id="invite-role"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-sky-500 dark:border-[#35353b] dark:bg-[#141418] dark:text-[#f4f4f5]"
+    >
+      <option value="editor">Editor</option>
+      <option value="viewer">Viewer</option>
+    </select>
+  </div>
+);
+
+const InvitePopover = ({
+  inviteQuery,
+  inviteRole,
+  onInviteQueryChange,
+  onInviteRoleChange,
+  onInvite,
+  suggestions,
+}) => {
+  const hasDirectInvite =
+    inviteQuery.length >= 2 && !suggestions.some((user) => user.email?.toLowerCase() === inviteQuery.toLowerCase());
+
+  return (
+    <div className="absolute right-0 top-full z-20 mt-3 w-[22rem] rounded-lg border border-slate-200 bg-white p-4 shadow-xl shadow-slate-900/10 dark:border-[#2b2b30] dark:bg-[#18181b] dark:shadow-black/40">
+      <div className="mb-3">
+        <h3 className="text-sm font-semibold text-slate-950 dark:text-[#f4f4f5]">Invite teammate</h3>
+        <p className="mt-1 text-xs text-slate-500 dark:text-[#a1a1aa]">Bring collaborators into this project without leaving the editor.</p>
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <label htmlFor="invite-email" className="mb-1 block text-xs font-medium uppercase tracking-[0.2em] text-slate-400">
+            Email
+          </label>
+          <input
+            id="invite-email"
+            type="email"
+            value={inviteQuery}
+            onChange={(event) => onInviteQueryChange(event.target.value)}
+            placeholder="name@example.com"
+            className="w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none transition focus:border-sky-500 dark:border-[#35353b] dark:bg-[#141418] dark:text-[#f4f4f5]"
+            autoComplete="off"
+          />
+        </div>
+
+        {suggestions.length > 0 && (
+          <div className="max-h-56 overflow-y-auto rounded-md border border-slate-200 dark:border-[#2b2b30]">
+            {suggestions.map((user) => (
+              <button
+                key={user._id}
+                type="button"
+                onClick={() => onInvite(user)}
+                className="flex w-full items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 text-left transition hover:bg-slate-50 last:border-b-0 dark:border-[#25252a] dark:hover:bg-[#202026]"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <UserAvatar
+                    user={{
+                      name: user.name || user.email,
+                      email: user.email,
+                      avatar: user.avatar,
+                      color: stringToColor(user.email || user.name),
+                    }}
+                    size="sm"
+                  />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-slate-900 dark:text-[#f4f4f5]">{user.name || user.email}</p>
+                    {user.name ? (
+                      <p className="truncate text-xs text-slate-500 dark:text-[#a1a1aa]">{user.email}</p>
+                    ) : null}
+                  </div>
+                </div>
+                <span className="rounded-md bg-sky-500/15 px-2 py-1 text-xs font-medium text-sky-700 dark:text-sky-300">Invite</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {hasDirectInvite ? (
+          <button
+            type="button"
+            onClick={() => onInvite(inviteQuery)}
+            className="flex w-full items-center justify-between rounded-md border border-dashed border-sky-300 bg-sky-50 px-3 py-2 text-left transition hover:bg-sky-100 dark:border-sky-500/40 dark:bg-sky-500/10 dark:hover:bg-sky-500/15"
+          >
+            <div>
+              <p className="text-sm font-medium text-slate-900 dark:text-[#f4f4f5]">Invite {inviteQuery}</p>
+              <p className="text-xs text-slate-500 dark:text-[#a1a1aa]">Send an email invitation directly.</p>
+            </div>
+            <span className="rounded-md bg-white/80 px-2 py-1 text-xs font-medium text-sky-700 dark:bg-[#0f172a] dark:text-sky-300">Send</span>
+          </button>
+        ) : null}
+
+        <RoleSelect value={inviteRole} onChange={onInviteRoleChange} />
+      </div>
+    </div>
+  );
 };
 
 const CollaboratorsBar = ({ projectId }) => {
   const { socket } = useSocket();
-  const [collabs, setCollabs] = useState([]);
+  const [collaborators, setCollaborators] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const isLoadingRef = useRef(true);
   const [showInvite, setShowInvite] = useState(false);
   const [inviteQuery, setInviteQuery] = useState('');
-  const [suggestions, setSuggestions] = useState([]);
   const [inviteRole, setInviteRole] = useState('editor');
+  const [suggestions, setSuggestions] = useState([]);
   const popoverRef = useRef(null);
 
-  useEffect(() => {
-    isLoadingRef.current = isLoading;
-  }, [isLoading]);
-
-  const handleInvite = async (userOrEmail) => {
-    if (!projectId || !socket) {
-      console.error('Missing projectId or socket connection');
-      return;
-    }
-    
-    const email = userOrEmail.email || userOrEmail;
-    if (!email) {
-      toast.error('Please enter a valid email address');
-      return;
-    }
-    
-    try {
-      // Optimistically update the UI
-      const tempId = `temp-${Date.now()}`;
-      const newCollaborator = {
-        _id: tempId,
-        email: email.toLowerCase().trim(),
-        name: email.split('@')[0],
-        role: inviteRole,
-        pending: true,
-        isOptimistic: true
-      };
-      
-      setCollabs(prev => [...prev, newCollaborator]);
-      
-      // Send the invitation
-      console.log('Sending invitation to:', email);
-      const response = await projectsApi.addCollaborator(projectId, {
-        email: email.toLowerCase().trim(),
-        role: inviteRole
-      });
-      
-      console.log('Invitation response:', response);
-      
-      if (response.data?.success) {
-        toast.success(`Invitation sent to ${email}`);
-        
-        // Update the collaborator list with the server response
-        if (response.data.data?.collaborators) {
-          setCollabs(response.data.data.collaborators);
-        }
-      } else {
-        throw new Error(response.data?.message || 'Failed to send invitation');
-      }
-      
-      // Reset form
-      setInviteQuery('');
-      setShowInvite(false);
-      
-    } catch (error) {
-      console.error('Error sending invitation:', error);
-      
-      // Remove the optimistic update on error
-      setCollabs(prev => prev.filter(c => !c.isOptimistic));
-      
-      // Show detailed error message
-      const errorMessage = error.response?.data?.message || 
-                         error.response?.data?.error || 
-                         error.message || 
-                         'Failed to send invitation';
-      
-      toast.error(`Error: ${errorMessage}`);
-      
-      // If there's a socket connection, request the latest collaborator list
-      if (socket.connected) {
-        console.log('Requesting updated collaborator list after error');
-        socket.emit('get-collaborators', projectId);
-      }
-    }
-  };
-
-  useEffect(() => {
-    if (!projectId) {
-      console.log('No projectId provided, skipping collaborator setup');
-      return () => {}; // Return empty cleanup function
-    }
-    
-    if (!socket) {
-      console.error('Socket not available, cannot load collaborators');
-      setIsLoading(false);
-      return () => {}; // Return empty cleanup function
-    }
-    
-    console.log('Setting up collaborator listener for project:', projectId);
-    setIsLoading(true);
-    
-    // Increase timeout to 30 seconds to accommodate slower connections
-    const LOADING_TIMEOUT = 30000;
-    const loadingTimeout = setTimeout(() => {
-      if (isLoadingRef.current) {
-        console.warn('Collaborator load timeout after', LOADING_TIMEOUT / 1000, 'seconds');
-        setIsLoading(false);
-        setCollabs([]);
-        toast.error('Loading collaborators timed out. Please check your connection.');
-      }
-    }, LOADING_TIMEOUT);
-
-    const onCollaboratorUpdate = (list) => {
-      console.log('Received collaborator update:', list);
-      clearTimeout(loadingTimeout);
-      setCollabs(Array.isArray(list) ? list : []);
-      setIsLoading(false);
-    };
-
-    const onError = (error) => {
-      console.error('Error loading collaborators:', error);
-      clearTimeout(loadingTimeout);
-      setIsLoading(false);
-      setCollabs([]);
-      
-      // Show a more specific error message if available
-      const errorMessage = error?.message || 'Failed to load collaborators';
-      toast.error(errorMessage, { duration: 5000 });
-    };
-
-    const requestCollaborators = () => {
-      if (!projectId) {
-        console.error('No projectId available to request collaborators');
-        return;
-      }
-      
-      console.log('Requesting collaborators for project:', projectId);
-      
-      if (socket?.connected) {
-        socket.emit('get-collaborators', projectId, (ack) => {
-          if (ack?.error) {
-            console.error('Error from get-collaborators ack:', ack.error);
-            onError(new Error(ack.error));
-          } else {
-            console.log('get-collaborators ack received:', ack);
-          }
-        });
-      } else {
-        console.log('Socket not connected, waiting for connection...');
-        const onConnect = () => {
-          if (socket?.connected) {
-            console.log('Socket connected, requesting collaborators for project:', projectId);
-            socket.emit('get-collaborators', projectId);
-          }
-        };
-        
-        // Add a one-time connect listener
-        const connectHandler = () => {
-          onConnect();
-          socket.off('connect', connectHandler);
-        };
-        
-        socket.on('connect', connectHandler);
-      }
-    };
-
-    // Set up event listeners
-    socket.on('collaborator-update', onCollaboratorUpdate);
-    socket.on('collaborator-error', onError);
-
-    // Handle initial connection
-    const handleConnect = () => {
-      console.log('Socket connected, requesting collaborators');
-      requestCollaborators();
-    };
-
-    if (socket.connected) {
-      handleConnect();
-    } else {
-      socket.on('connect', handleConnect);
-    }
-
-    // Set up disconnect handler
-    const handleDisconnect = (reason) => {
-      console.log('Socket disconnected:', reason);
-      toast.error('Disconnected from server. Reconnecting...', { duration: 3000 });
-    };
-    
-    socket.on('disconnect', handleDisconnect);
-
-    // Initial request
-    requestCollaborators();
-
-    // Cleanup function
-    return () => {
-      console.log('Cleaning up collaborator listeners for project:', projectId);
-      clearTimeout(loadingTimeout);
-      
-      // Remove all listeners to prevent memory leaks
-      socket.off('collaborator-update', onCollaboratorUpdate);
-      socket.off('collaborator-error', onError);
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-      
-      // Clean up any pending connect handlers
-      socket.off('connect');
-    };
-  }, [projectId, socket]);
+  const inviteButtonLabel = useMemo(
+    () => (collaborators.length > 0 ? 'Invite' : 'Add teammate'),
+    [collaborators.length]
+  );
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -253,286 +149,174 @@ const CollaboratorsBar = ({ projectId }) => {
   }, []);
 
   useEffect(() => {
-    if (inviteQuery.length < 2) {
-      setSuggestions([]);
-      return;
+    if (!projectId || !socket) {
+      setCollaborators([]);
+      setIsLoading(false);
+      return undefined;
     }
 
-    const searchUsers = async () => {
+    setIsLoading(true);
+
+    const finishLoading = (list) => {
+      setCollaborators(Array.isArray(list) ? list : []);
+      setIsLoading(false);
+    };
+
+    const handleCollaborators = (list) => finishLoading(list);
+    const handleError = (error) => {
+      setIsLoading(false);
+      toast.error(error?.message || 'Could not load collaborators');
+    };
+
+    const requestCollaborators = () => {
+      socket.emit('get-collaborators', projectId);
+    };
+
+    socket.on('collaborator-update', handleCollaborators);
+    socket.on('collaborator-error', handleError);
+
+    if (socket.connected) {
+      requestCollaborators();
+    } else {
+      socket.once('connect', requestCollaborators);
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setIsLoading(false);
+    }, 12000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      socket.off('collaborator-update', handleCollaborators);
+      socket.off('collaborator-error', handleError);
+      socket.off('connect', requestCollaborators);
+    };
+  }, [projectId, socket]);
+
+  useEffect(() => {
+    if (inviteQuery.trim().length < 2) {
+      setSuggestions([]);
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
       try {
-        const response = await projectsApi.searchUsers(inviteQuery);
-        if (response.data) {
-          setSuggestions(Array.isArray(response.data) ? response.data : []);
-        }
+        const response = await projectsApi.searchUsers(inviteQuery.trim());
+        setSuggestions(Array.isArray(response.data) ? response.data : []);
       } catch (error) {
         console.error('Error searching users:', error);
         setSuggestions([]);
       }
-    };
+    }, 250);
 
-    const timer = setTimeout(searchUsers, 300);
-    return () => clearTimeout(timer);
+    return () => window.clearTimeout(timeoutId);
   }, [inviteQuery]);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center space-x-2">
-        <div className="h-2 w-2 bg-gray-300 rounded-full animate-pulse"></div>
-        <span className="text-sm text-gray-500">Loading collaborators...</span>
-      </div>
-    );
-  }
+  const handleInvite = async (userOrEmail) => {
+    if (!projectId) {
+      toast.error('Save the project before inviting teammates');
+      return;
+    }
 
-  if (collabs.length === 0) {
-    console.log('Rendering no collaborators state, showInvite:', showInvite);
-    return (
-      <div className="relative">
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            console.log('Add collaborator button clicked');
-            setShowInvite(prev => !prev);
-          }}
-          className="flex items-center px-3 py-1 text-sm font-medium rounded-full bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
-        >
-          <UserPlusIcon className="w-4 h-4 mr-1" />
-          Add collaborator
-        </button>
-        {showInvite && (
-          <div 
-            ref={popoverRef} 
-            className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 z-10 border border-gray-200 dark:border-gray-700"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="font-medium text-gray-900 dark:text-white mb-3">Invite to project</h3>
-            <div className="space-y-3">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Email address
-                </label>
-                <input
-                  type="email"
-                  id="email"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
-                  placeholder="name@example.com"
-                  value={inviteQuery}
-                  onChange={(e) => setInviteQuery(e.target.value)}
-                  autoComplete="off"
-                />
-              </div>
-              
-              {suggestions.length > 0 && (
-                <div className="border rounded-md divide-y divide-gray-200 dark:divide-gray-700 max-h-60 overflow-y-auto">
-                  {suggestions.map((user) => (
-                    <div key={user._id} className="p-2 hover:bg-gray-50 dark:hover:bg-gray-700 flex justify-between items-center">
-                      <div className="flex items-center space-x-2">
-                        <UserAvatar user={{
-                          name: user.name || user.email,
-                          email: user.email,
-                          avatarText: user.name ? user.name.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase(),
-                          color: `hsl(${user._id.split('').reduce((a, b) => a + b.charCodeAt(0), 0) % 360}, 70%, 60%)`
-                        }} size="sm" />
-                        <div>
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">{user.name || user.email}</div>
-                          {user.name && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400">{user.email}</div>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                        onClick={() => handleInvite(user)}
-                      >
-                        Invite
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+    const email = typeof userOrEmail === 'string' ? userOrEmail : userOrEmail?.email;
+    if (!email) {
+      toast.error('Enter a valid email address');
+      return;
+    }
 
-              {inviteQuery && inviteQuery.length >= 2 && !suggestions.some(u => u.email === inviteQuery) && (
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                  <button
-                    type="button"
-                    className="w-full flex justify-between items-center p-2 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-700 rounded-md"
-                    onClick={() => handleInvite(inviteQuery)}
-                  >
-                    <div className="flex items-center">
-                      <div className="h-8 w-8 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-gray-700 dark:text-gray-200 font-medium text-sm mr-2">
-                        {inviteQuery.charAt(0).toUpperCase()}
-                      </div>
-                      <span className="font-medium text-gray-900 dark:text-white">
-                        Invite {inviteQuery}
-                      </span>
-                    </div>
-                    <span className="text-xs text-indigo-600 dark:text-indigo-400">Invite</span>
-                  </button>
-                </div>
-              )}
+    try {
+      const response = await projectsApi.addCollaborator(projectId, {
+        email: email.trim().toLowerCase(),
+        role: inviteRole,
+      });
 
-              <div>
-                <label htmlFor="role" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Role
-                </label>
-                <select
-                  id="role"
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
-                >
-                  <option value="editor">Editor</option>
-                  <option value="viewer">Viewer</option>
-                </select>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
+      const nextCollaborators = response.data?.data?.collaborators;
+      if (Array.isArray(nextCollaborators)) {
+        setCollaborators(nextCollaborators);
+      }
+
+      toast.success(`Invitation sent to ${email}`);
+      setInviteQuery('');
+      setSuggestions([]);
+      setShowInvite(false);
+    } catch (error) {
+      console.error('Error sending invitation:', error);
+      toast.error(error.response?.data?.message || error.message || 'Failed to send invitation');
+    }
+  };
+
+  const normalizedCollaborators = useMemo(
+    () =>
+      (Array.isArray(collaborators) ? collaborators : []).map((collaborator) => {
+        const name =
+          collaborator?.name ||
+          collaborator?.username ||
+          collaborator?.email?.split('@')[0] ||
+          'Anonymous';
+        const email = collaborator?.email || `${name}@example.com`;
+
+        return {
+          id: collaborator?.userId || collaborator?._id || collaborator?.id || email,
+          name,
+          email,
+          avatar: collaborator?.avatar,
+          role: collaborator?.role,
+          status: collaborator?.status || 'online',
+          color: collaborator?.color || stringToColor(email || name),
+        };
+      }),
+    [collaborators]
+  );
 
   return (
-    <div className="relative flex items-center space-x-4">
-      {/* Collaborators list - Notion/Google Docs style */}
-      <div className="flex items-center -space-x-3">
-        {Array.isArray(collabs) && collabs.map((collaborator) => {
-          // Ensure we have valid data
-          if (!collaborator) return null;
-          
-          const userId = collaborator.userId || collaborator._id || collaborator.id;
-          const name = collaborator.name || collaborator.username || collaborator.email?.split('@')[0] || 'Anonymous';
-          const email = collaborator.email || `${collaborator.username || 'user'}@example.com`;
-          const avatarText = name.charAt(0).toUpperCase();
-          const color = collaborator.color || stringToColor(email || name);
-          
-          return (
-            <div 
-              key={userId} 
-              className="relative group transition-transform hover:-translate-y-1 duration-200"
-              title={`${name}${email && email !== name ? ` (${email})` : ''}`}
-            >
-              <UserAvatar 
-                user={{
-                  id: userId,
-                  name,
-                  email,
-                  avatar: collaborator.avatar,
-                  avatarText,
-                  color,
-                  status: collaborator.status || 'online'
-                }} 
-                showTooltip={true}
-              />
-              {collaborator.status === 'online' && (
-                <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full bg-green-500 ring-2 ring-white dark:ring-gray-800" />
-              )}
-            </div>
-          );
-        })}
+    <div ref={popoverRef} className="relative flex items-center gap-3">
+      <div className="hidden items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-500 dark:border-[#2b2b30] dark:bg-[#141418] dark:text-[#a1a1aa] md:flex">
+        <span className={`h-2 w-2 rounded-full ${socket?.connected ? 'bg-emerald-400' : 'bg-amber-400'}`} aria-hidden />
+        {socket?.connected ? 'Team live' : 'Reconnecting'}
       </div>
 
-      {/* Add collaborator button */}
-      <div className="relative">
-        <button
-          onClick={() => setShowInvite(!showInvite)}
-          className="flex items-center px-3 py-1 text-sm font-medium rounded-full bg-indigo-600 hover:bg-indigo-700 text-white transition-colors"
-        >
-          <UserPlusIcon className="w-4 h-4 mr-1" />
-          Add more
-        </button>
-        
-        {showInvite && (
-          <div 
-            ref={popoverRef}
-            className="absolute right-0 mt-2 w-80 bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 z-10 border border-gray-200 dark:border-gray-700"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h3 className="font-medium text-gray-900 dark:text-white mb-3">Invite to project</h3>
-            <div className="space-y-3">
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Email address
-                </label>
-                <input
-                  type="email"
-                  id="email"
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
-                  placeholder="name@example.com"
-                  value={inviteQuery}
-                  onChange={(e) => setInviteQuery(e.target.value)}
-                  autoComplete="off"
-                />
+      {isLoading ? (
+        <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#a1a1aa]">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-sky-400" aria-hidden />
+          Loading teammates...
+        </div>
+      ) : (
+        <>
+          <div className="flex items-center -space-x-2">
+            {normalizedCollaborators.slice(0, 5).map((collaborator) => (
+              <div key={collaborator.id} className="transition-transform hover:-translate-y-0.5">
+                <UserAvatar user={collaborator} size="sm" showTooltip />
               </div>
-              
-              {suggestions.length > 0 && (
-                <div className="border rounded-md divide-y divide-gray-200 dark:divide-gray-700 max-h-60 overflow-y-auto">
-                  {suggestions.map((user) => (
-                    <div key={user._id} className="p-2 hover:bg-gray-50 dark:hover:bg-gray-700 flex justify-between items-center">
-                      <div className="flex items-center space-x-2">
-                        <UserAvatar user={{
-                          name: user.name || user.email,
-                          email: user.email,
-                          avatarText: user.name ? user.name.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase(),
-                          color: `hsl(${user._id.split('').reduce((a, b) => a + b.charCodeAt(0), 0) % 360}, 70%, 60%)`
-                        }} size="sm" />
-                        <div>
-                          <div className="text-sm font-medium text-gray-900 dark:text-white">{user.name || user.email}</div>
-                          {user.name && (
-                            <div className="text-xs text-gray-500 dark:text-gray-400">{user.email}</div>
-                          )}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        className="px-2 py-1 text-xs bg-indigo-600 text-white rounded hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                        onClick={() => handleInvite(user)}
-                      >
-                        Invite
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
+            ))}
 
-              {inviteQuery && inviteQuery.length >= 2 && !suggestions.some(u => u.email === inviteQuery) && (
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-3">
-                  <button
-                    type="button"
-                    className="w-full flex justify-between items-center p-2 text-sm text-left hover:bg-gray-50 dark:hover:bg-gray-700 rounded-md"
-                    onClick={() => handleInvite(inviteQuery)}
-                  >
-                    <div className="flex items-center">
-                      <div className="h-8 w-8 rounded-full bg-gray-200 dark:bg-gray-600 flex items-center justify-center text-gray-700 dark:text-gray-200 font-medium text-sm mr-2">
-                        {inviteQuery.charAt(0).toUpperCase()}
-                      </div>
-                      <span className="font-medium text-gray-900 dark:text-white">
-                        Invite {inviteQuery}
-                      </span>
-                    </div>
-                    <span className="text-xs text-indigo-600 dark:text-indigo-400">Invite</span>
-                  </button>
-                </div>
-              )}
-
-              <div>
-                <label htmlFor="role" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Role
-                </label>
-                <select
-                  id="role"
-                  value={inviteRole}
-                  onChange={(e) => setInviteRole(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-white"
-                >
-                  <option value="editor">Editor</option>
-                  <option value="viewer">Viewer</option>
-                </select>
-              </div>
-            </div>
+            {normalizedCollaborators.length > 5 ? (
+              <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-white bg-slate-100 text-[11px] font-semibold text-slate-700 dark:border-[#18181b] dark:bg-[#23232a] dark:text-[#d4d4d8]">
+                +{normalizedCollaborators.length - 5}
+              </span>
+            ) : null}
           </div>
-        )}
-      </div>
+
+          <button
+            type="button"
+            onClick={() => setShowInvite((current) => !current)}
+            className="inline-flex items-center rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-xs font-medium text-sky-700 transition hover:bg-sky-500/15 dark:text-sky-300"
+          >
+            <UserPlusIcon className="mr-1.5 h-4 w-4" />
+            {inviteButtonLabel}
+          </button>
+        </>
+      )}
+
+      {showInvite ? (
+        <InvitePopover
+          inviteQuery={inviteQuery}
+          inviteRole={inviteRole}
+          onInviteQueryChange={setInviteQuery}
+          onInviteRoleChange={setInviteRole}
+          onInvite={handleInvite}
+          suggestions={suggestions}
+        />
+      ) : null}
     </div>
   );
 };

@@ -1,7 +1,14 @@
 import {
+  ArrowDownTrayIcon,
+  BoltIcon,
+  BookOpenIcon,
+  ChartBarIcon,
   ChatBubbleLeftRightIcon,
+  CheckCircleIcon,
+  ExclamationTriangleIcon,
   PencilSquareIcon,
   PlusIcon,
+  ShieldCheckIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline';
 import { useTheme } from '../../context/ThemeContext';
@@ -13,6 +20,7 @@ import EditorTabs from './EditorTabs';
 import TestRunner from './TestRunner';
 import CollaboratorsBar from './CollaboratorsBar';
 import ChatPanel from './ChatPanel';
+import OpenFileTabs from '../workspace/OpenFileTabs';
 import { useRef } from 'react';
 import { useEffect, useCallback, useState } from 'react';
 
@@ -45,8 +53,15 @@ const CodePlayground = ({
   language = 'javascript',
   projectId,
   onSave,
+  onCodeChange,
   readOnly = false,
   className = '',
+  activeFilePath,
+  openFilePaths = [],
+  workspaceFiles = [],
+  entryFilePath,
+  onOpenFile,
+  onCloseFile,
   /** Controlled team chat panel (for IDE activity bar) */
   chatOpen: chatOpenControlled,
   onChatOpenChange,
@@ -74,6 +89,7 @@ const CodePlayground = ({
   const [editingSnippetTitle, setEditingSnippetTitle] = useState('');
   const [workflowLoaded, setWorkflowLoaded] = useState(false);
   const [workflowSaveState, setWorkflowSaveState] = useState('idle');
+  const [openApiDownloadState, setOpenApiDownloadState] = useState('idle');
   const isChatOpen = chatOpenControlled !== undefined ? chatOpenControlled : internalChatOpen;
   const setChatOpen = useCallback(
     (next) => {
@@ -87,8 +103,6 @@ const CodePlayground = ({
   // Reset editor content when initialCode prop changes (e.g., navigating to New Project)
   useEffect(() => {
     setCode(initialCode);
-    setEndpoints([]);
-    setLogs([]);
     setActiveTab('editor');
     // For a new project (no projectId), allow immediate save of boilerplate
     setHasUnsavedChanges(!projectId);
@@ -210,8 +224,19 @@ const CodePlayground = ({
       ]);
 
       const [execSettled, parseSettled] = await Promise.allSettled([
-        executionApi.executeCode(code, projectId),
-        executionApi.parseCode(code),
+        executionApi.executeCode(
+          {
+            code,
+            files: workspaceFiles,
+            entryFilePath,
+          },
+          projectId
+        ),
+        executionApi.parseCode({
+          code,
+          files: workspaceFiles,
+          entryFilePath,
+        }),
       ]);
 
       if (parseSettled.status === 'fulfilled') {
@@ -315,7 +340,7 @@ const CodePlayground = ({
       ]);
       setActiveTab('console');
     }
-  }, [code, isRunning, projectId]);
+  }, [code, entryFilePath, isRunning, projectId, workspaceFiles]);
 
   // Handle code formatting
   const handleFormatCode = useCallback(() => {
@@ -330,7 +355,11 @@ const CodePlayground = ({
     
     setIsSaving(true);
     try {
-      await onSave(code);
+      await onSave({
+        code,
+        files: workspaceFiles,
+        entryFilePath,
+      });
       setHasUnsavedChanges(false);
     } catch (error) {
       console.error('Error saving code:', error);
@@ -345,15 +374,16 @@ const CodePlayground = ({
     } finally {
       setIsSaving(false);
     }
-  }, [code, isSaving, onSave]);
+  }, [code, entryFilePath, isSaving, onSave, workspaceFiles]);
 
   // Handle resetting code
   const handleReset = useCallback(() => {
     if (window.confirm('Are you sure you want to reset the code to its initial state? Any unsaved changes will be lost.')) {
       setCode(initialCode);
+      onCodeChange?.(initialCode);
       setHasUnsavedChanges(false);
     }
-  }, [initialCode]);
+  }, [initialCode, onCodeChange]);
 
   // Handle editor mount
   const handleEditorMount = useCallback((editor, monaco) => {
@@ -409,7 +439,8 @@ const CodePlayground = ({
   // Handle code change
   const handleCodeChange = useCallback((newCode) => {
     setCode(newCode);
-  }, []);
+    onCodeChange?.(newCode);
+  }, [onCodeChange]);
 
   // Handle console clear
   const handleClearConsole = useCallback(() => {
@@ -538,6 +569,45 @@ const CodePlayground = ({
     setSnippets((currentSnippets) => currentSnippets.filter((snippet) => (snippet.id || snippet._id) !== snippetId));
   }, []);
 
+  const handleDownloadOpenApi = useCallback(async (source) => {
+    setOpenApiDownloadState(source);
+
+    try {
+      const token = localStorage.getItem('token');
+      const request =
+        source === 'saved'
+          ? fetch(`/api/openapi/${projectId}`, {
+              headers: { Authorization: `Bearer ${token}` },
+              credentials: 'include',
+            })
+          : fetch('/api/openapi', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              credentials: 'include',
+              body: JSON.stringify({ code, files: workspaceFiles, entryFilePath }),
+            });
+
+      const res = await request;
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = source === 'saved' ? `openapi-${projectId}.json` : 'openapi-current.json';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('OpenAPI download failed', err);
+    } finally {
+      setOpenApiDownloadState('idle');
+    }
+  }, [code, entryFilePath, projectId, workspaceFiles]);
+
   const ideChrome = surface === 'ide';
   const workflowStatusText =
     !projectId || projectId === 'new'
@@ -572,27 +642,27 @@ const CodePlayground = ({
         ];
 
         return (
-          <div className="h-full overflow-auto bg-[#111113] p-4 text-[#e4e4e7]">
-            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="h-full overflow-auto bg-[#141418] p-5 text-[#e4e4e7]">
+            <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-[#202024]/80 pb-4">
               <div>
-                <h3 className="text-base font-semibold">Task Board</h3>
-                <p className="text-sm text-[#a1a1aa]">Plan the coding work, track progress, and keep project execution close to the editor.</p>
-                <p className="mt-1 text-xs text-[#858585]">{workflowStatusText}</p>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-sky-400">Task Board</h3>
+                <p className="text-xs text-[#a1a1aa] mt-0.5">Plan tasks, track progress, and manage project execution directly beside the code.</p>
+                <p className="mt-1 text-[10px] font-bold text-[#808088] uppercase tracking-wide">{workflowStatusText}</p>
               </div>
-              <div className="flex min-w-0 gap-2">
+              <div className="flex min-w-0 gap-2 items-center">
                 <input
                   value={newTaskTitle}
                   onChange={(event) => setNewTaskTitle(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') handleAddTask();
                   }}
-                  className="min-w-0 rounded-md border border-[#3c3c3c] bg-[#1e1e1e] px-3 py-2 text-sm text-[#f4f4f5] placeholder-[#71717a] focus:border-[#38bdf8] focus:outline-none"
-                  placeholder="Add a task"
+                  className="min-w-[180px] rounded-lg border border-[#2b2b30]/80 bg-[#1e1e24] px-3.5 py-1.5 text-xs text-[#f4f4f5] placeholder-[#71717a] focus:border-sky-500 focus:outline-none transition-all duration-200"
+                  placeholder="Task description..."
                 />
                 <select
                   value={newTaskPriority}
                   onChange={(event) => setNewTaskPriority(event.target.value)}
-                  className="rounded-md border border-[#3c3c3c] bg-[#1e1e1e] px-3 py-2 text-sm text-[#f4f4f5] focus:border-[#38bdf8] focus:outline-none"
+                  className="rounded-lg border border-[#2b2b30]/80 bg-[#1e1e24] px-2.5 py-1.5 text-xs text-[#f4f4f5] focus:border-sky-500 focus:outline-none transition-all duration-200 cursor-pointer"
                 >
                   <option value="High">High</option>
                   <option value="Medium">Medium</option>
@@ -601,29 +671,29 @@ const CodePlayground = ({
                 <button
                   type="button"
                   onClick={handleAddTask}
-                  className="inline-flex items-center rounded-md bg-[#0ea5e9] px-3 py-2 text-sm font-medium text-white hover:bg-[#0284c7]"
+                  className="inline-flex items-center rounded-lg bg-sky-500 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-sky-600 shadow-sm shadow-sky-500/10 active:scale-97 transition-all duration-200"
                 >
-                  <PlusIcon className="mr-1.5 h-4 w-4" />
+                  <PlusIcon className="mr-1 h-3.5 w-3.5 stroke-[2.5]" />
                   Add
                 </button>
               </div>
             </div>
 
-            <div className="grid gap-3 lg:grid-cols-3">
+            <div className="grid gap-4 lg:grid-cols-3">
               {columns.map((column) => {
                 const columnTasks = tasks.filter((task) => task.status === column.id);
 
                 return (
-                  <section key={column.id} className="min-h-72 rounded-md border border-[#2b2b30] bg-[#18181b]">
-                    <div className="flex items-center justify-between border-b border-[#2b2b30] px-3 py-2">
-                      <h4 className="text-sm font-semibold">{column.title}</h4>
-                      <span className="rounded bg-[#2d2d30] px-2 py-0.5 text-xs text-[#a1a1aa]">{columnTasks.length}</span>
+                  <section key={column.id} className="min-h-72 rounded-xl border border-[#202024]/80 bg-[#0f0f13]/60 flex flex-col">
+                    <div className="flex items-center justify-between border-b border-[#202024]/80 px-4 py-3 bg-[#0f0f13]/85 rounded-t-xl">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-[#a0a0a8]">{column.title}</h4>
+                      <span className="rounded-lg bg-[#202025] px-2.5 py-0.5 text-[10px] font-bold text-[#808088]">{columnTasks.length}</span>
                     </div>
-                    <div className="space-y-2 p-3">
+                    <div className="space-y-3 p-3 flex-1 overflow-y-auto max-h-[50vh]">
                       {columnTasks.length ? (
                         columnTasks.map((task) => (
-                          <article key={task.id || task._id} className="rounded-md border border-[#3c3c3c] bg-[#1f1f23] p-3">
-                            <div className="flex items-start justify-between gap-2">
+                          <article key={task.id || task._id} className="rounded-xl border border-[#2b2b30]/60 bg-[#1a1a20]/90 p-4 transition-all duration-200 hover:border-sky-500/25 hover:shadow-sm">
+                            <div className="flex items-start justify-between gap-2.5">
                               {editingTaskId === (task.id || task._id) ? (
                                 <input
                                   value={editingTaskTitle}
@@ -633,55 +703,66 @@ const CodePlayground = ({
                                     if (event.key === 'Enter') handleCommitTaskEdit();
                                     if (event.key === 'Escape') setEditingTaskId(null);
                                   }}
-                                  className="min-w-0 flex-1 rounded border border-[#38bdf8] bg-[#111113] px-2 py-1 text-sm text-[#f4f4f5] outline-none"
+                                  className="min-w-0 flex-1 rounded border border-sky-500 bg-[#111113] px-2 py-1 text-xs text-[#f4f4f5] outline-none"
                                   autoFocus
                                 />
                               ) : (
-                                <p className="min-w-0 flex-1 text-sm font-medium text-[#f4f4f5]">{task.title}</p>
+                                <p className="min-w-0 flex-1 text-xs font-semibold leading-relaxed text-[#e4e4e7]">{task.title}</p>
                               )}
-                              <select
-                                value={task.priority || 'Medium'}
-                                onChange={(event) => handleUpdateTaskPriority(task.id || task._id, event.target.value)}
-                                className="rounded border border-sky-500/30 bg-sky-500/15 px-2 py-0.5 text-[11px] font-medium text-sky-300 outline-none"
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const currentPriority = task.priority || 'Medium';
+                                  const nextPriority = currentPriority === 'High' ? 'Low' : currentPriority === 'Medium' ? 'High' : 'Medium';
+                                  handleUpdateTaskPriority(task.id || task._id, nextPriority);
+                                }}
+                                className={`shrink-0 rounded-lg px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider cursor-pointer hover:scale-105 active:scale-95 transition-all duration-150 ${
+                                  (task.priority || 'Medium') === 'High' 
+                                    ? 'bg-rose-500/10 text-rose-400 border border-rose-500/15 hover:bg-rose-500/20'
+                                    : (task.priority || 'Medium') === 'Medium'
+                                      ? 'bg-sky-500/10 text-sky-400 border border-sky-500/15 hover:bg-sky-500/20'
+                                      : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/15 hover:bg-emerald-500/20'
+                                }`}
+                                title="Click to cycle priority"
                               >
-                                <option value="High">High</option>
-                                <option value="Medium">Medium</option>
-                                <option value="Low">Low</option>
-                              </select>
+                                {task.priority || 'Medium'}
+                              </button>
                             </div>
-                            <div className="mt-3 flex flex-wrap gap-2">
+                            <div className="mt-4 flex flex-wrap gap-1.5 items-center">
                               {columns.map((targetColumn) => (
                                 <button
                                   key={targetColumn.id}
                                   type="button"
                                   onClick={() => handleMoveTask(task.id || task._id, targetColumn.id)}
                                   disabled={task.status === targetColumn.id}
-                                  className="rounded border border-[#3c3c3c] px-2 py-1 text-xs text-[#d4d4d8] hover:border-[#38bdf8] disabled:cursor-default disabled:border-[#0ea5e9] disabled:text-sky-300"
+                                  className="rounded-lg border border-[#2b2b30]/80 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-[#a0a0a8] hover:border-sky-500 hover:text-white disabled:cursor-default disabled:border-sky-500/30 disabled:text-sky-400 disabled:bg-sky-500/5 transition-all duration-200"
                                 >
-                                  {targetColumn.title}
+                                  {targetColumn.id}
                                 </button>
                               ))}
                               <button
                                 type="button"
                                 onClick={() => handleStartEditTask(task)}
-                                className="ml-auto rounded border border-[#3c3c3c] px-2 py-1 text-xs text-[#d4d4d8] hover:border-[#38bdf8] hover:text-sky-300"
+                                className="ml-auto rounded-lg border border-[#2b2b30]/80 p-1.5 text-xs text-[#a0a0a8] hover:border-sky-500 hover:text-sky-400 transition-all duration-200"
                                 title="Edit task"
                               >
-                                <PencilSquareIcon className="h-4 w-4" />
+                                <PencilSquareIcon className="h-3.5 w-3.5" />
                               </button>
                               <button
                                 type="button"
                                 onClick={() => handleDeleteTask(task.id || task._id)}
-                                className="rounded border border-red-500/30 px-2 py-1 text-xs text-red-300 hover:bg-red-500/10"
+                                className="rounded-lg border border-rose-500/20 p-1.5 text-xs text-rose-400 hover:bg-rose-500/10 hover:text-rose-450 transition-all duration-200"
                                 title="Delete task"
                               >
-                                <TrashIcon className="h-4 w-4" />
+                                <TrashIcon className="h-3.5 w-3.5" />
                               </button>
                             </div>
                           </article>
                         ))
                       ) : (
-                        <p className="rounded-md border border-dashed border-[#3c3c3c] p-3 text-sm text-[#858585]">No tasks here.</p>
+                        <div className="rounded-xl border border-dashed border-[#2b2b30]/80 p-6 text-center text-xs text-[#808088]">
+                          No tasks in this column.
+                        </div>
                       )}
                     </div>
                   </section>
@@ -719,10 +800,10 @@ const CodePlayground = ({
             </div>
 
             {snippets.length ? (
-              <div className="grid gap-3 xl:grid-cols-2">
+              <div className="grid gap-4 xl:grid-cols-2">
                 {snippets.map((snippet) => (
-                  <article key={snippet.id || snippet._id} className="overflow-hidden rounded-md border border-[#2b2b30] bg-[#18181b]">
-                    <div className="flex items-center justify-between gap-3 border-b border-[#2b2b30] px-3 py-2">
+                  <article key={snippet.id || snippet._id} className="overflow-hidden rounded-xl border border-[#2b2b30]/65 bg-[#1a1a20]/90 transition-all duration-250 hover:border-sky-500/20">
+                    <div className="flex items-center justify-between gap-3 border-b border-[#202024]/85 px-4 py-3 bg-[#0f0f13]/60">
                       <div className="min-w-0">
                         {editingSnippetId === (snippet.id || snippet._id) ? (
                           <input
@@ -733,234 +814,388 @@ const CodePlayground = ({
                               if (event.key === 'Enter') handleCommitSnippetEdit();
                               if (event.key === 'Escape') setEditingSnippetId(null);
                             }}
-                            className="w-full rounded border border-[#38bdf8] bg-[#111113] px-2 py-1 text-sm text-[#f4f4f5] outline-none"
+                            className="w-full rounded-lg border border-sky-500 bg-[#111113] px-2.5 py-1 text-xs text-[#f4f4f5] outline-none"
                             autoFocus
                           />
                         ) : (
-                          <h4 className="truncate text-sm font-semibold text-[#f4f4f5]">{snippet.title}</h4>
+                          <h4 className="truncate text-xs font-bold text-[#f4f4f5] tracking-wide">{snippet.title}</h4>
                         )}
-                        <p className="text-xs text-[#858585]">{snippet.language.toUpperCase()} - {new Date(snippet.createdAt).toLocaleString()}</p>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-[#808088] mt-0.5">{snippet.language} · {new Date(snippet.createdAt).toLocaleDateString()}</p>
                       </div>
-                      <div className="flex shrink-0 gap-2">
+                      <div className="flex shrink-0 gap-1.5">
                         <button
                           type="button"
                           onClick={() => handleCopySnippet(snippet.code)}
-                          className="rounded border border-[#3c3c3c] px-2 py-1 text-xs text-[#d4d4d8] hover:border-[#38bdf8] hover:text-sky-300"
+                          className="rounded-lg border border-[#2b2b30]/85 px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#c0c0c8] hover:border-sky-500 hover:text-white transition-all duration-200"
                         >
                           Copy
                         </button>
                         <button
                           type="button"
                           onClick={() => handleStartEditSnippet(snippet)}
-                          className="rounded border border-[#3c3c3c] px-2 py-1 text-xs text-[#d4d4d8] hover:border-[#38bdf8] hover:text-sky-300"
+                          className="rounded-lg border border-[#2b2b30]/85 p-1.5 text-xs text-[#c0c0c8] hover:border-sky-500 hover:text-sky-400 transition-all duration-200"
                           title="Rename snippet"
                         >
-                          <PencilSquareIcon className="h-4 w-4" />
+                          <PencilSquareIcon className="h-3.5 w-3.5" />
                         </button>
                         <button
                           type="button"
                           onClick={() => handleDeleteSnippet(snippet.id || snippet._id)}
-                          className="rounded border border-red-500/30 px-2 py-1 text-xs text-red-300 hover:bg-red-500/10"
+                          className="rounded-lg border border-rose-500/20 p-1.5 text-xs text-rose-450 hover:bg-rose-500/10 hover:text-rose-400 transition-all duration-200"
                           title="Delete snippet"
                         >
-                          <TrashIcon className="h-4 w-4" />
+                          <TrashIcon className="h-3.5 w-3.5" />
                         </button>
                       </div>
                     </div>
-                    <pre className="max-h-56 overflow-auto bg-[#0f172a] p-3 text-xs leading-relaxed text-[#d4d4d8]">{snippet.code}</pre>
+                    <pre className="max-h-56 overflow-auto bg-[#0c0c0f]/90 p-4 font-mono text-[11px] leading-relaxed text-[#c0c0c8]">{snippet.code}</pre>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="flex min-h-72 flex-col items-center justify-center rounded-xl border border-dashed border-[#2b2b30]/80 bg-[#0f0f13]/40 text-center p-6">
+                <p className="text-xs font-semibold text-[#f4f4f5]">No snippets saved yet</p>
+                <p className="mt-1.5 max-w-xs text-xs text-[#808088] leading-relaxed">Highlight reusable code in the editor, name it, and save it here to build your personal library.</p>
+              </div>
+            )}
+          </div>
+        );
+      case 'documentation': {
+        const methodCounts = endpoints.reduce((acc, endpoint) => {
+          const next = { ...acc };
+          next[endpoint.method] = (next[endpoint.method] || 0) + 1;
+          return next;
+        }, {});
+        const totalParameters = endpoints.reduce(
+          (count, endpoint) => count + (endpoint.parameters?.length || 0),
+          0
+        );
+
+        return (
+          <div className="h-full overflow-auto bg-[#111113] p-4 text-[#e4e4e7]">
+            <div className="mb-4 flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+              <div>
+                <h3 className="text-base font-semibold">API Documentation</h3>
+                <p className="text-sm text-[#a1a1aa]">
+                  Review the route map detected from the current code and export OpenAPI specs for saved or in-progress work.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadOpenApi('saved')}
+                  disabled={!projectId || projectId === 'new' || openApiDownloadState !== 'idle'}
+                  className="inline-flex items-center rounded-md border border-sky-500/30 bg-sky-500/10 px-3 py-2 text-sm font-medium text-sky-300 transition hover:bg-sky-500/15 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <ArrowDownTrayIcon className="mr-2 h-4 w-4" />
+                  {openApiDownloadState === 'saved' ? 'Preparing saved spec...' : 'Download saved OpenAPI'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDownloadOpenApi('current')}
+                  disabled={openApiDownloadState !== 'idle'}
+                  className="inline-flex items-center rounded-md bg-[#0ea5e9] px-3 py-2 text-sm font-medium text-white transition hover:bg-[#0284c7] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <BookOpenIcon className="mr-2 h-4 w-4" />
+                  {openApiDownloadState === 'current' ? 'Preparing current spec...' : 'Download current OpenAPI'}
+                </button>
+              </div>
+            </div>
+
+            <div className="mb-4 grid gap-3 lg:grid-cols-4">
+              <div className="rounded-md border border-[#2b2b30] bg-[#18181b] p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-[#858585]">Endpoints</p>
+                <p className="mt-2 text-2xl font-semibold text-[#f4f4f5]">{endpoints.length}</p>
+              </div>
+              <div className="rounded-md border border-[#2b2b30] bg-[#18181b] p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-[#858585]">Parameters</p>
+                <p className="mt-2 text-2xl font-semibold text-[#f4f4f5]">{totalParameters}</p>
+              </div>
+              <div className="rounded-md border border-[#2b2b30] bg-[#18181b] p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-[#858585]">Methods</p>
+                <p className="mt-2 text-2xl font-semibold text-[#f4f4f5]">{Object.keys(methodCounts).length}</p>
+              </div>
+              <div className="rounded-md border border-[#2b2b30] bg-[#18181b] p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-[#858585]">Coverage</p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((methodName) => (
+                    <span
+                      key={methodName}
+                      className={`rounded border px-2 py-1 text-[11px] font-semibold ${
+                        methodCounts[methodName]
+                          ? methodName === 'GET'
+                            ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                            : methodName === 'POST'
+                              ? 'border-sky-500/30 bg-sky-500/15 text-sky-300'
+                              : methodName === 'PUT'
+                                ? 'border-amber-500/30 bg-amber-500/15 text-amber-300'
+                                : methodName === 'PATCH'
+                                  ? 'border-violet-500/30 bg-violet-500/15 text-violet-300'
+                                  : 'border-red-500/30 bg-red-500/15 text-red-300'
+                          : 'border-[#3c3c3c] bg-[#111113] text-[#71717a]'
+                      }`}
+                    >
+                      {methodName} {methodCounts[methodName] || 0}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {endpoints.length > 0 ? (
+              <div className="space-y-4">
+                {endpoints.map((endpoint, index) => (
+                  <article key={`${endpoint.method}-${endpoint.path}-${index}`} className="overflow-hidden rounded-md border border-[#2b2b30] bg-[#18181b]">
+                    <div className="border-b border-[#2b2b30] px-4 py-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span
+                          className={`rounded border px-2 py-1 text-[11px] font-semibold ${
+                            endpoint.method === 'GET'
+                              ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                              : endpoint.method === 'POST'
+                                ? 'border-sky-500/30 bg-sky-500/15 text-sky-300'
+                                : endpoint.method === 'PUT'
+                                  ? 'border-amber-500/30 bg-amber-500/15 text-amber-300'
+                                  : endpoint.method === 'DELETE'
+                                    ? 'border-red-500/30 bg-red-500/15 text-red-300'
+                                    : 'border-violet-500/30 bg-violet-500/15 text-violet-300'
+                          }`}
+                        >
+                          {endpoint.method}
+                        </span>
+                        <code className="font-mono text-sm text-[#f4f4f5]">{endpoint.path}</code>
+                      </div>
+                      <p className="mt-2 text-sm text-[#a1a1aa]">
+                        {endpoint.description || 'No route description detected yet. Add comments or richer handler naming if you want more context here.'}
+                      </p>
+                    </div>
+
+                    <div className="grid gap-4 px-4 py-4 xl:grid-cols-[minmax(0,1fr)_240px]">
+                      <div>
+                        <h4 className="mb-2 text-sm font-semibold text-[#f4f4f5]">Parameters</h4>
+                        {endpoint.parameters && endpoint.parameters.length > 0 ? (
+                          <div className="overflow-x-auto rounded-md border border-[#2b2b30]">
+                            <table className="min-w-full divide-y divide-[#2b2b30]">
+                              <thead className="bg-[#111113]">
+                                <tr>
+                                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.2em] text-[#858585]">Name</th>
+                                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.2em] text-[#858585]">Type</th>
+                                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.2em] text-[#858585]">Required</th>
+                                  <th className="px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.2em] text-[#858585]">Description</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-[#2b2b30]">
+                                {endpoint.parameters.map((param, i) => (
+                                  <tr key={`${param.name}-${i}`}>
+                                    <td className="px-3 py-2 whitespace-nowrap font-mono text-sm text-[#f4f4f5]">{param.name}</td>
+                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-[#a1a1aa]">{param.type || 'string'}</td>
+                                    <td className="px-3 py-2 whitespace-nowrap text-sm text-[#a1a1aa]">
+                                      {param.required ? 'Required' : 'Optional'}
+                                    </td>
+                                    <td className="px-3 py-2 text-sm text-[#a1a1aa]">{param.description || 'No description yet'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : (
+                          <div className="rounded-md border border-dashed border-[#3c3c3c] p-3 text-sm text-[#858585]">
+                            No path or body parameters detected for this route.
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="rounded-md border border-[#2b2b30] bg-[#111113] p-3">
+                          <p className="text-xs uppercase tracking-[0.2em] text-[#858585]">Suggested test path</p>
+                          <p className="mt-2 font-mono text-sm text-[#d4d4d8]">{endpoint.path}</p>
+                        </div>
+                        <div className="rounded-md border border-[#2b2b30] bg-[#111113] p-3">
+                          <p className="text-xs uppercase tracking-[0.2em] text-[#858585]">Route shape</p>
+                          <p className="mt-2 text-sm text-[#a1a1aa]">
+                            {endpoint.parameters?.length
+                              ? `${endpoint.parameters.length} parameter${endpoint.parameters.length === 1 ? '' : 's'} detected`
+                              : 'No explicit parameters detected'}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
                   </article>
                 ))}
               </div>
             ) : (
               <div className="flex min-h-72 flex-col items-center justify-center rounded-md border border-dashed border-[#3c3c3c] text-center">
-                <p className="text-sm font-medium text-[#f4f4f5]">No snippets saved yet</p>
-                <p className="mt-1 max-w-sm text-sm text-[#858585]">Highlight reusable code in the editor, name it, and save it here for later.</p>
+                <BookOpenIcon className="h-10 w-10 text-[#52525b]" />
+                <p className="mt-4 text-sm font-medium text-[#f4f4f5]">No API endpoints detected yet</p>
+                <p className="mt-1 max-w-md text-sm text-[#858585]">
+                  Run your code after adding Express route handlers and Dev Deck will document the endpoints here automatically.
+                </p>
               </div>
             )}
           </div>
         );
-      case 'documentation':
-        return (
-          <div className="p-4 h-full overflow-auto">
-            <h3 className="text-lg font-medium mb-4">API Documentation</h3>
-            {endpoints.length > 0 ? (
-              <div className="space-y-6">
-                {endpoints.map((endpoint, index) => (
-                  <div key={index} className="border rounded-lg p-4">
-                    <div className="flex items-center space-x-2 mb-2">
-                      <span className={`px-2 py-1 text-xs font-medium rounded ${
-                        endpoint.method === 'GET' ? 'bg-green-100 text-green-800' :
-                        endpoint.method === 'POST' ? 'bg-blue-100 text-blue-800' :
-                        endpoint.method === 'PUT' ? 'bg-yellow-100 text-yellow-800' :
-                        endpoint.method === 'DELETE' ? 'bg-red-100 text-red-800' :
-                        'bg-gray-100 text-gray-800'
-                      }`}>
-                        {endpoint.method}
-                      </span>
-                      <code className="text-sm font-mono">{endpoint.path}</code>
-                    </div>
-                    {endpoint.description && (
-                      <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">
-                        {endpoint.description}
-                      </p>
-                    )}
-                    {endpoint.parameters && endpoint.parameters.length > 0 && (
-                      <div className="mt-3">
-                        <h4 className="text-sm font-medium mb-2">Parameters</h4>
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                            <thead>
-                              <tr>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Name</th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Type</th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Required</th>
-                                <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Description</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-                              {endpoint.parameters.map((param, i) => (
-                                <tr key={i}>
-                                  <td className="px-3 py-2 whitespace-nowrap text-sm font-mono">{param.name}</td>
-                                  <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{param.type || 'string'}</td>
-                                  <td className="px-3 py-2 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                                    {param.required ? 'Yes' : 'No'}
-                                  </td>
-                                  <td className="px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
-                                    {param.description || 'No description'}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-                <p>No API endpoints detected in your code.</p>
-                <p className="mt-2 text-sm">Add Express.js route handlers to see them documented here.</p>
-              </div>
-            )}
-            <div className="mt-6 flex items-center space-x-2">
-              <button
-                onClick={async () => {
-                  try {
-                    const token = localStorage.getItem('token');
-                    const res = await fetch(`/api/openapi/${projectId}`, {
-                      headers: { Authorization: `Bearer ${token}` },
-                      credentials: 'include',
-                    });
-                    const data = await res.json();
-                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `openapi-${projectId}.json`;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    URL.revokeObjectURL(url);
-                  } catch (err) {
-                    console.error('OpenAPI download failed', err);
-                  }
-                }}
-                className="inline-flex items-center px-3 py-1.5 rounded bg-indigo-600 text-white"
-              >
-                Download OpenAPI (Saved Code)
-              </button>
-              <button
-                onClick={async () => {
-                  try {
-                    const token = localStorage.getItem('token');
-                    const res = await fetch(`/api/openapi`, {
-                      method: 'POST',
-                      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                      credentials: 'include',
-                      body: JSON.stringify({ code }),
-                    });
-                    const data = await res.json();
-                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = `openapi-current.json`;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    URL.revokeObjectURL(url);
-                  } catch (err) {
-                    console.error('OpenAPI download failed', err);
-                  }
-                }}
-                className="inline-flex items-center px-3 py-1.5 rounded bg-gray-700 text-white"
-              >
-                Download OpenAPI (Current Editor)
-              </button>
-            </div>
-          </div>
-        );
+      }
       case 'test':
         return (
           <TestRunner endpoints={endpoints} projectId={projectId} />
         );
-      case 'insights':
+      case 'insights': {
+        const lineCount = code.split('\n').length;
+        const qualityScore = Math.max(
+          58,
+          92 -
+            (code.length > 1800 ? 10 : 0) -
+            (code.includes('var ') ? 6 : 0) -
+            (code.includes('eval(') ? 12 : 0) -
+            (code.includes('innerHTML') ? 8 : 0)
+        );
+        const qualitySummary =
+          code.length > 1000
+            ? 'The file is growing into shared-workspace territory. Breaking route helpers or validators into smaller units would make reviews easier.'
+            : 'The file is still at a manageable size and reads like one focused unit of work.';
+        const performanceItems = [
+          ...(code.includes('setTimeout') || code.includes('setInterval')
+            ? ['Consider using requestAnimationFrame for UI animation work instead of timer loops.']
+            : ['No obvious timing or animation issues stand out in the current code.']),
+          ...(code.includes('JSON.parse') && !code.includes('try')
+            ? ['Wrap JSON.parse in error handling so malformed input does not crash the flow.']
+            : []),
+        ];
+        const securityItems = [
+          ...(code.includes('eval(') ? ['Avoid eval(); it introduces a serious code-injection risk.'] : []),
+          ...(code.includes('localStorage') && code.includes('sensitive')
+            ? ['Avoid keeping sensitive data in localStorage where browser scripts can reach it.']
+            : []),
+          ...(code.includes('innerHTML') ? ['Treat innerHTML carefully to avoid accidental XSS exposure.'] : []),
+        ];
+        const practiceItems = [
+          ...(!code.includes('use strict') ? ["Consider adding 'use strict' to make accidental globals less likely."] : []),
+          ...(code.includes('var ') ? ['Prefer const or let over var so scope stays predictable.'] : []),
+          ...(code.includes('==') && !code.includes('===') ? ['Prefer strict equality checks unless coercion is truly intended.'] : []),
+        ];
+        const totalRecommendations =
+          performanceItems.length + securityItems.length + practiceItems.length;
+
         return (
-          <div className="p-4 h-full overflow-auto">
-            <h3 className="text-lg font-medium mb-4">Code Insights</h3>
-            <div className="space-y-4">
-              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                <h4 className="font-medium text-blue-800 dark:text-blue-200 mb-2">Code Quality</h4>
-                <p className="text-sm text-blue-700 dark:text-blue-300">
-                  {code.length > 1000 
-                    ? 'Your code is getting long. Consider breaking it into smaller, reusable functions.'
-                    : 'Your code looks well-structured and maintainable.'}
+          <div className="h-full overflow-auto bg-[#141418] p-5 text-[#e4e4e7]">
+            <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-[#202024]/80 pb-4">
+              <div>
+                <h3 className="text-sm font-bold uppercase tracking-wider text-sky-400">Code Insights</h3>
+                <p className="text-xs text-[#a1a1aa] mt-0.5">
+                  Analyze file maintainability, performance safety, and clean coding best practices dynamically.
                 </p>
               </div>
-              
-              <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
-                <h4 className="font-medium text-purple-800 dark:text-purple-200 mb-2">Performance</h4>
-                <ul className="text-sm text-purple-700 dark:text-purple-300 space-y-1">
-                  {code.includes('setTimeout') || code.includes('setInterval')
-                    ? <li>• Consider using requestAnimationFrame for animations instead of setInterval</li>
-                    : <li>• No obvious performance issues detected</li>}
-                  {code.includes('JSON.parse') && !code.includes('try') && 
-                    <li>• Add error handling around JSON.parse to prevent runtime errors</li>}
-                </ul>
+              <div className="rounded-lg border border-sky-500/15 bg-sky-500/10 px-3.5 py-1.5 text-xs font-bold text-sky-400">
+                {totalRecommendations} recommendation{totalRecommendations === 1 ? '' : 's'} pending
               </div>
-              
-              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4">
-                <h4 className="font-medium text-green-800 dark:text-green-200 mb-2">Security</h4>
-                <ul className="text-sm text-green-700 dark:text-green-300 space-y-1">
-                  {code.includes('eval(') && 
-                    <li>• Avoid using eval() as it can lead to XSS vulnerabilities</li>}
-                  {code.includes('localStorage') && code.includes('sensitive') && 
-                    <li>• Avoid storing sensitive data in localStorage</li>}
-                  {code.includes('innerHTML') && 
-                    <li>• Be cautious with innerHTML to prevent XSS attacks</li>}
-                  {!code.includes('eval(') && !code.includes('innerHTML') &&
-                    <li>• No obvious security issues detected</li>}
-                </ul>
+            </div>
+
+            <div className="mb-5 grid gap-4 lg:grid-cols-4">
+              <div className="rounded-xl border border-[#2b2b30]/65 bg-[#1a1a20]/90 p-5 shadow-sm relative overflow-hidden group">
+                <div className={`absolute top-0 left-0 bottom-0 w-1 ${qualityScore >= 80 ? 'bg-emerald-500' : qualityScore >= 60 ? 'bg-amber-500' : 'bg-rose-500'}`} />
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#808088]">Health score</p>
+                <p className={`mt-3 text-3xl font-extrabold tracking-tight ${qualityScore >= 80 ? 'text-emerald-400' : qualityScore >= 60 ? 'text-amber-400' : 'text-rose-400'}`}>{qualityScore}<span className="text-sm font-normal text-[#808088]">/100</span></p>
               </div>
-              
-              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
-                <h4 className="font-medium text-yellow-800 dark:text-yellow-200 mb-2">Best Practices</h4>
-                <ul className="text-sm text-yellow-700 dark:text-yellow-300 space-y-1">
-                  {!code.includes('use strict') && 
-                    <li>• Consider adding 'use strict' at the top of your script</li>}
-                  {code.includes('var ') && 
-                    <li>• Consider using const/let instead of var for better scoping</li>}
-                  {code.includes('==') && !code.includes('===') && 
-                    <li>• Prefer strict equality (===) over loose equality (==)</li>}
-                  {!code.includes('var ') && !code.includes('==') &&
-                    <li>• Following modern JavaScript best practices</li>}
-                </ul>
+              <div className="rounded-xl border border-[#2b2b30]/65 bg-[#1a1a20]/90 p-5 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 left-0 bottom-0 w-1 bg-violet-500" />
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#808088]">Lines of Code</p>
+                <p className="mt-3 text-3xl font-extrabold text-[#f4f4f5] tracking-tight">{lineCount}</p>
+              </div>
+              <div className="rounded-xl border border-[#2b2b30]/65 bg-[#1a1a20]/90 p-5 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 left-0 bottom-0 w-1 bg-sky-500" />
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#808088]">Active Endpoints</p>
+                <p className="mt-3 text-3xl font-extrabold text-[#f4f4f5] tracking-tight">{endpoints.length}</p>
+              </div>
+              <div className="rounded-xl border border-[#2b2b30]/65 bg-[#1a1a20]/90 p-5 shadow-sm relative overflow-hidden">
+                <div className="absolute top-0 left-0 bottom-0 w-1 bg-indigo-500" />
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#808088]">Workflow State</p>
+                <p className="mt-3.5 text-xs font-bold text-[#f4f4f5] uppercase tracking-wide">{workflowStatusText}</p>
+              </div>
+            </div>
+
+            <div className="mb-5 rounded-xl border border-[#2b2b30]/65 bg-[#1a1a20]/90 p-5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <ChartBarIcon className="mt-0.5 h-5 w-5 text-sky-400" />
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#f4f4f5]">Quality Summary</h4>
+                  <p className="mt-2 text-xs text-[#a1a1aa] leading-relaxed font-normal">{qualitySummary}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-3">
+              <section className="rounded-xl border border-[#2b2b30]/65 bg-[#1a1a20]/90 overflow-hidden shadow-sm flex flex-col">
+                <div className="flex items-center gap-2 border-b border-[#202024]/85 px-4 py-3 bg-[#0f0f13]/60">
+                  <BoltIcon className="h-4 w-4 text-violet-400" />
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#f4f4f5]">Performance</h4>
+                </div>
+                <div className="space-y-3 p-4 flex-1 overflow-y-auto max-h-[40vh]">
+                  {performanceItems.map((item) => (
+                    <div key={item} className="rounded-lg border border-violet-500/15 bg-violet-500/8 p-3 text-xs leading-relaxed text-[#c0c0c8] border-l-2 border-l-violet-500">
+                      {item}
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-[#2b2b30]/65 bg-[#1a1a20]/90 overflow-hidden shadow-sm flex flex-col">
+                <div className="flex items-center gap-2 border-b border-[#202024]/85 px-4 py-3 bg-[#0f0f13]/60">
+                  <ShieldCheckIcon className="h-4 w-4 text-emerald-405 text-emerald-400" />
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#f4f4f5]">Security</h4>
+                </div>
+                <div className="space-y-3 p-4 flex-1 overflow-y-auto max-h-[40vh]">
+                  {securityItems.length ? (
+                    securityItems.map((item) => (
+                      <div key={item} className="rounded-lg border border-emerald-500/15 bg-emerald-500/8 p-3 text-xs leading-relaxed text-[#c0c0c8] border-l-2 border-l-emerald-500">
+                        {item}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-emerald-500/15 bg-emerald-500/8 p-3 text-xs leading-relaxed text-[#c0c0c8] border-l-2 border-l-emerald-500">
+                      No obvious security vulnerabilities were detected in this code.
+                    </div>
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-xl border border-[#2b2b30]/65 bg-[#1a1a20]/90 overflow-hidden shadow-sm flex flex-col">
+                <div className="flex items-center gap-2 border-b border-[#202024]/85 px-4 py-3 bg-[#0f0f13]/60">
+                  <CheckCircleIcon className="h-4 w-4 text-amber-400" />
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#f4f4f5]">Best Practices</h4>
+                </div>
+                <div className="space-y-3 p-4 flex-1 overflow-y-auto max-h-[40vh]">
+                  {practiceItems.length ? (
+                    practiceItems.map((item) => (
+                      <div key={item} className="rounded-lg border border-amber-500/15 bg-amber-500/8 p-3 text-xs leading-relaxed text-[#c0c0c8] border-l-2 border-l-amber-500">
+                        {item}
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-lg border border-amber-500/15 bg-amber-500/8 p-3 text-xs leading-relaxed text-[#c0c0c8] border-l-2 border-l-amber-500">
+                      Code is aligned with current standard linting conventions.
+                    </div>
+                  )}
+                </div>
+              </section>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-amber-500/15 bg-amber-500/8 p-5 shadow-sm">
+              <div className="flex items-start gap-3">
+                <ExclamationTriangleIcon className="mt-0.5 h-5 w-5 text-amber-400" />
+                <div>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-[#f4f4f5]">Suggested Next Move</h4>
+                  <p className="mt-2 text-xs text-[#a1a1aa] leading-relaxed font-normal">
+                    {code.length > 1000
+                      ? 'Consider breaking down larger functions and routing components into helper submodules for easier review cycles.'
+                      : 'You have comfortable headroom in this file. Take this moment to document route shapes while the codebase is clean.'}
+                  </p>
+                </div>
               </div>
             </div>
           </div>
         );
+      }
       case 'editor':
       default:
         return (
@@ -968,6 +1203,8 @@ const CodePlayground = ({
             value={code}
             onChange={handleCodeChange}
             language={language}
+            fileName={activeFilePath?.split('/').pop()}
+            activeFilePath={activeFilePath}
             onMount={handleEditorMount}
             onValidate={handleEditorValidation}
             projectId={projectId}
@@ -996,21 +1233,30 @@ const CodePlayground = ({
           <button
             type="button"
             onClick={() => setChatOpen((o) => !o)}
-            className={`inline-flex items-center px-3 py-1.5 border border-transparent text-xs font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-transparent ${
+            className={`inline-flex items-center px-3.5 py-1.5 border border-transparent text-xs font-semibold rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition-all duration-200 active:scale-97 ${
               ideChrome
-                ? `text-[#e4e4e7] ${isChatOpen ? 'bg-[#0e639c]' : 'bg-[#3c3c3c]'} hover:bg-[#505050] focus:ring-[#0e639c]`
+                ? `text-[#e4e4e7] ${isChatOpen ? 'bg-[#0ea5e9] text-white shadow-sm ring-1 ring-sky-500/20' : 'bg-[#1e1e24] hover:bg-[#282830] hover:text-white border-[#202024]/60'}`
                 : theme === 'dark'
-                  ? `text-white ${isChatOpen ? 'bg-indigo-600' : 'bg-gray-700'} hover:bg-gray-600 focus:ring-gray-500`
-                  : `text-gray-700 ${isChatOpen ? 'bg-indigo-100' : 'bg-white'} border-gray-300 hover:bg-gray-50 focus:ring-indigo-500`
+                  ? `text-white ${isChatOpen ? 'bg-indigo-650' : 'bg-gray-700'} hover:bg-gray-655`
+                  : `text-gray-700 ${isChatOpen ? 'bg-indigo-100' : 'bg-white'} border-gray-300 hover:bg-gray-50`
             }`}
             aria-label="Toggle chat"
           >
-            <ChatBubbleLeftRightIcon className="h-4 w-4 mr-1.5" />
+            <ChatBubbleLeftRightIcon className="h-4.5 w-4.5 mr-1.5" />
             Chat
           </button>
           <CollaboratorsBar projectId={projectId} />
         </div>
       </EditorToolbar>
+
+      <OpenFileTabs
+        files={workspaceFiles}
+        activeFilePath={activeFilePath}
+        openFilePaths={openFilePaths}
+        onSelect={onOpenFile}
+        onClose={onCloseFile}
+        surface={surface}
+      />
       
       {/* Tabs */}
       <EditorTabs
